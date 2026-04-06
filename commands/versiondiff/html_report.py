@@ -501,6 +501,7 @@ function applyFilters() {
     </div>
 
     {filter_badges}
+    <div style="font-size:11px;color:#999;margin:-14px 0 16px 2px;">Click a badge to show or hide those rows</div>
 
     {feature_table}
 
