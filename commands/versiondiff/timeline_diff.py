@@ -31,6 +31,11 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
     for i in range(timeline.count):
         item = timeline.item(i)
 
+        # Skip timeline groups -- their child features are already
+        # individual timeline items and will be collected in index order.
+        if item.isGroup:
+            continue
+
         # Extract short type name from entity objectType
         # Some timeline items have invalid/broken entities that raise RuntimeError
         try:
