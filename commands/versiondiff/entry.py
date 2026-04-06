@@ -153,85 +153,98 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
         # --- Phase 2: Build Dialog ---
 
-        cmd = args.command
-        inputs = cmd.commandInputs
+        # Show busy indicator in the Fusion status bar while loading version data
+        progress = ui.progressBar
+        progress.showBusy("Version Diff — Loading version history...")
+        adsk.doEvents()
 
-        # Current version info group
-        info_group = inputs.addGroupCommandInput("current_version_info", "Current Version")
-        info_group.isEnabledCheckBoxDisplayed = False
-        info_group.isExpanded = True
+        try:
+            cmd = args.command
+            inputs = cmd.commandInputs
 
-        group_inputs = info_group.children
+            # Current version info group
+            info_group = inputs.addGroupCommandInput("current_version_info", "Current Version")
+            info_group.isEnabledCheckBoxDisplayed = False
+            info_group.isExpanded = True
 
-        # Gather current version metadata
-        version_num = data_file.versionNumber
-        date_str = ""
-        if data_file.dateModified:
-            date_str = datetime.fromtimestamp(data_file.dateModified).strftime("%Y-%m-%d %H:%M:%S")
-        updated_by = ""
-        if data_file.lastUpdatedBy:
-            updated_by = data_file.lastUpdatedBy.displayName
-        description = data_file.description or "(no description)"
+            group_inputs = info_group.children
 
-        group_inputs.addTextBoxCommandInput(
-            "info_version", "Version",
-            f"<b>Version {version_num}</b> of {data_file.latestVersionNumber}",
-            1, True,
-        )
-        group_inputs.addTextBoxCommandInput(
-            "info_date", "Date Saved",
-            date_str,
-            1, True,
-        )
-        group_inputs.addTextBoxCommandInput(
-            "info_user", "Saved By",
-            updated_by,
-            1, True,
-        )
-        group_inputs.addTextBoxCommandInput(
-            "info_desc", "Description",
-            description,
-            1, True,
-        )
+            # Gather current version metadata
+            version_num = data_file.versionNumber
+            date_str = ""
+            if data_file.dateModified:
+                date_str = datetime.fromtimestamp(data_file.dateModified).strftime("%Y-%m-%d %H:%M:%S")
+            updated_by = ""
+            if data_file.lastUpdatedBy:
+                updated_by = data_file.lastUpdatedBy.displayName
+            description = data_file.description or "(no description)"
 
-        # Comparison version dropdown
-        dropdown = inputs.addDropDownCommandInput(
-            "compare_version",
-            "Compare With Version",
-            adsk.core.DropDownStyles.TextListDropDownStyle,
-        )
+            progress.message = "Version Diff — Reading current version info..."
+            adsk.doEvents()
 
-        current_version_num = data_file.versionNumber
-        total_versions = versions.count
+            group_inputs.addTextBoxCommandInput(
+                "info_version", "Version",
+                f"<b>Version {version_num}</b> of {data_file.latestVersionNumber}",
+                1, True,
+            )
+            group_inputs.addTextBoxCommandInput(
+                "info_date", "Date Saved",
+                date_str,
+                1, True,
+            )
+            group_inputs.addTextBoxCommandInput(
+                "info_user", "Saved By",
+                updated_by,
+                1, True,
+            )
+            group_inputs.addTextBoxCommandInput(
+                "info_desc", "Description",
+                description,
+                1, True,
+            )
 
-        # Log status to the text command window (no dialog)
-        futil.log(f"Version Diff: loading {total_versions} versions...", force_console=True)
+            # Comparison version dropdown
+            dropdown = inputs.addDropDownCommandInput(
+                "compare_version",
+                "Compare With Version",
+                adsk.core.DropDownStyles.TextListDropDownStyle,
+            )
 
-        # Collect and sort versions by version number descending (newest first)
-        version_list = []
-        for i in range(total_versions):
-            ver = versions.item(i)
-            if ver.versionNumber == current_version_num:
-                continue
-            version_list.append(ver)
+            current_version_num = data_file.versionNumber
+            total_versions = versions.count
 
-        version_list.sort(key=lambda v: v.versionNumber, reverse=True)
+            progress.message = f"Version Diff — Loading {total_versions} versions..."
+            adsk.doEvents()
 
-        is_first = True
-        for ver in version_list:
-            ver_date = ""
-            if ver.dateModified:
-                ver_date = datetime.fromtimestamp(ver.dateModified).strftime("%Y-%m-%d %H:%M")
-            ver_user = ""
-            if ver.lastUpdatedBy:
-                ver_user = ver.lastUpdatedBy.displayName
+            # Collect and sort versions by version number descending (newest first)
+            version_list = []
+            for i in range(total_versions):
+                ver = versions.item(i)
+                if ver.versionNumber == current_version_num:
+                    continue
+                version_list.append(ver)
 
-            label = f"V{ver.versionNumber} - {ver_date} - {ver_user}"
-            dropdown.listItems.add(label, is_first)
-            _version_map[label] = ver
-            is_first = False
+            version_list.sort(key=lambda v: v.versionNumber, reverse=True)
 
-        futil.log(f"Version Diff: loaded {len(version_list)} versions", force_console=True)
+            progress.message = "Version Diff — Building version list..."
+            adsk.doEvents()
+
+            is_first = True
+            for ver in version_list:
+                ver_date = ""
+                if ver.dateModified:
+                    ver_date = datetime.fromtimestamp(ver.dateModified).strftime("%Y-%m-%d %H:%M")
+                ver_user = ""
+                if ver.lastUpdatedBy:
+                    ver_user = ver.lastUpdatedBy.displayName
+
+                label = f"V{ver.versionNumber} - {ver_date} - {ver_user}"
+                dropdown.listItems.add(label, is_first)
+                _version_map[label] = ver
+                is_first = False
+
+        finally:
+            progress.hide()
 
         # Connect event handlers
         futil.add_handler(
