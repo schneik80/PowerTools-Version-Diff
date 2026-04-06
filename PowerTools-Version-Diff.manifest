@@ -1,0 +1,13 @@
+{
+	"autodeskProduct":	"Fusion",
+	"type":	"addin",
+	"id":	"e7a3c1f9-5b2d-4e8a-9f6c-3d1a7b4e2c5f",
+	"author":	"IMA LLC",
+	"description":	{
+		"":	"Compare timeline differences between document versions"
+	},
+	"version":	"1.0",
+	"runOnStartup":	true,
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true
+}
