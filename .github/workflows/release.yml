@@ -58,6 +58,18 @@ jobs:
           ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
           chmod +x installer/mac/postinstall
 
+          # Find the Developer ID Installer identity from the keychain
+          SIGNING_IDENTITY=$(security find-identity -v -p basic /tmp/build.keychain-db \
+            | grep "Developer ID Installer" \
+            | head -1 \
+            | sed -E 's/^[^"]*"(.+)".*$/\1/')
+
+          if [ -z "${SIGNING_IDENTITY}" ]; then
+            echo "::error::No Developer ID Installer certificate found in keychain"
+            exit 1
+          fi
+          echo "Found signing identity: ${SIGNING_IDENTITY}"
+
           # Build unsigned package
           pkgbuild \
             --root /tmp/pkg-root \
@@ -69,7 +81,7 @@ jobs:
 
           # Sign with Developer ID Installer certificate
           productsign \
-            --sign "Developer ID Installer: ${{ secrets.APPLE_TEAM_ID }}" \
+            --sign "${SIGNING_IDENTITY}" \
             "${ADDIN_NAME}-unsigned.pkg" \
             "${ADDIN_NAME}.pkg"
 
