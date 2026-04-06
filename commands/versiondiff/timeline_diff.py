@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import tempfile
 from datetime import datetime
@@ -10,6 +11,10 @@ import adsk.core
 import adsk.fusion
 
 from .timeline_model import TimelineFeature, VersionInfo, DiffEntry, DiffResult, AlignedRow
+
+# Pattern to parse Occurrence names like "Center Diff Mount v2:1"
+# Captures: (base_component_name, version_number, instance_number)
+_OCCURRENCE_NAME_RE = re.compile(r"^(.+?)\s+v(\d+):(\d+)$")
 
 
 def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
@@ -41,25 +46,19 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
             feature_type = full_type.split("::")[-1] if "::" in full_type else full_type
             entity_type = full_type
 
-            # For Occurrence (XREF) features, extract component name and version
+            # For Occurrence (XREF) features, parse name to extract
+            # base component name, version, and instance.
+            # Name format: "ComponentName vN:I" e.g. "Center Diff Mount v2:1"
             if feature_type == "Occurrence":
                 feature_type = "XREF"
-                try:
-                    occ = adsk.fusion.Occurrence.cast(entity)
-                    if occ and occ.component:
-                        component_name = occ.component.name
-                        # Try to get source document version info
-                        try:
-                            src_file = occ.component.parentDesign.parentDocument.dataFile
-                            if src_file:
-                                component_version = f"V{src_file.versionNumber}"
-                        except:
-                            pass
-                        # If no external version, try to read from the occurrence name
-                        if not component_version:
-                            component_version = ""
-                except:
-                    pass
+                match = _OCCURRENCE_NAME_RE.match(item.name)
+                if match:
+                    component_name = f"{match.group(1)}:{match.group(3)}"  # "Center Diff Mount:1"
+                    component_version = f"v{match.group(2)}"               # "v2"
+                else:
+                    # Fallback: use full name if pattern doesn't match
+                    component_name = item.name
+                    component_version = ""
         else:
             feature_type = "Group" if item.isGroup else "Unknown"
             entity_type = ""
