@@ -14,6 +14,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Decode certificate
+          echo "${APPLE_CERTIFICATE_P12}" | base64 --decode > /tmp/certificate.p12
+
+          # Create temporary keychain
+          KEYCHAIN_PATH="/tmp/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          # Import certificate into keychain
+          security import /tmp/certificate.p12 \
+            -P "${APPLE_CERTIFICATE_PASSWORD}" \
+            -A -t cert -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+
+          # Allow productsign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          # Add keychain to search list
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
+
+          # Clean up certificate file
+          rm /tmp/certificate.p12
+
       - name: Prepare payload
         run: |
           ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
@@ -22,17 +53,50 @@ jobs:
           # Copy add-in source files, excluding build/installer artifacts
           rsync -a --exclude='.git' --exclude='.github' --exclude='installer' --exclude='.gitignore' --exclude='LICENSE' . "${STAGING}/"
 
-      - name: Build .pkg
+      - name: Build and sign .pkg
         run: |
           ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
           chmod +x installer/mac/postinstall
+
+          # Build unsigned package
           pkgbuild \
             --root /tmp/pkg-root \
             --scripts installer/mac \
             --identifier "com.ima-llc.${ADDIN_NAME}" \
             --version "${{ github.ref_name }}" \
             --install-location / \
+            "${ADDIN_NAME}-unsigned.pkg"
+
+          # Sign with Developer ID Installer certificate
+          productsign \
+            --sign "Developer ID Installer: ${{ secrets.APPLE_TEAM_ID }}" \
+            "${ADDIN_NAME}-unsigned.pkg" \
             "${ADDIN_NAME}.pkg"
+
+          rm "${ADDIN_NAME}-unsigned.pkg"
+
+      - name: Notarize .pkg
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
+
+          # Submit for notarization and wait for result
+          xcrun notarytool submit "${ADDIN_NAME}.pkg" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_ID_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait
+
+          # Staple the notarization ticket to the .pkg
+          xcrun stapler staple "${ADDIN_NAME}.pkg"
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain /tmp/build.keychain-db 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
