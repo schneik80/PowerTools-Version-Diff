@@ -38,12 +38,26 @@ class DiffEntry:
 
 
 @dataclass
+class AlignedRow:
+    """A single row in the two-column aligned diff view.
+
+    Each row has an older side and a newer side. One side may be None
+    when a feature only exists in one version.
+    """
+    older: Optional[TimelineFeature]
+    newer: Optional[TimelineFeature]
+    status: str  # "newer" | "deleted" | "unchanged"
+
+
+@dataclass
 class DiffResult:
     """Complete diff output comparing two version timelines."""
     baseline: VersionInfo
     comparison: VersionInfo
-    features: list = field(default_factory=list)  # list[DiffEntry]
+    features: list = field(default_factory=list)      # list[DiffEntry]
+    aligned_rows: list = field(default_factory=list)   # list[AlignedRow]
     summary: dict = field(default_factory=dict)
+    older_is_comparison: bool = True  # True when comparison is older than baseline
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)

@@ -315,13 +315,18 @@ def command_execute(args: adsk.core.CommandEventArgs):
         compare_doc = None
 
         # Compute diff
-        diff_entries, summary = compute_diff(baseline_features, compare_features)
+        diff_entries, aligned_rows, summary = compute_diff(baseline_features, compare_features)
+
+        # Determine chronological order: is comparison older or newer?
+        older_is_comparison = compare_info.version_number < baseline_info.version_number
 
         diff_result = DiffResult(
             baseline=baseline_info,
             comparison=compare_info,
             features=diff_entries,
+            aligned_rows=aligned_rows,
             summary=summary,
+            older_is_comparison=older_is_comparison,
         )
 
         # Save JSON

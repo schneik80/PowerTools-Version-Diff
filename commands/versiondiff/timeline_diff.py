@@ -9,7 +9,7 @@ from typing import Optional
 import adsk.core
 import adsk.fusion
 
-from .timeline_model import TimelineFeature, VersionInfo, DiffEntry, DiffResult
+from .timeline_model import TimelineFeature, VersionInfo, DiffEntry, DiffResult, AlignedRow
 
 
 def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
@@ -103,12 +103,16 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     - "deleted": feature exists in comparison but not in baseline (removed since comparison)
     - "unchanged": feature exists in both
 
+    Also produces aligned rows for the two-column report layout. Rows are
+    walked in timeline order, interleaving both sides so that matched features
+    share a row and unmatched features leave one side empty.
+
     Args:
         baseline_features: List of TimelineFeature from the current version.
         compare_features: List of TimelineFeature from the comparison version.
 
     Returns:
-        Tuple of (list[DiffEntry], summary_dict).
+        Tuple of (list[DiffEntry], list[AlignedRow], summary_dict).
     """
     # Build lookup dicts keyed by (name, feature_type)
     baseline_map = {}
@@ -156,6 +160,51 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
                 compare_index=f.index,
             ))
 
+    # --- Build aligned rows for two-column view ---
+    # Walk both timelines with two pointers, merging matched features
+    # into shared rows and inserting unmatched features with an empty side.
+    aligned_rows = []
+    bi = 0  # baseline pointer
+    ci = 0  # compare pointer
+
+    while bi < len(baseline_features) or ci < len(compare_features):
+        bf = baseline_features[bi] if bi < len(baseline_features) else None
+        cf = compare_features[ci] if ci < len(compare_features) else None
+
+        if bf and cf:
+            b_key = (bf.name, bf.feature_type)
+            c_key = (cf.name, cf.feature_type)
+
+            if b_key == c_key:
+                # Same feature in both -- unchanged row
+                aligned_rows.append(AlignedRow(older=cf, newer=bf, status="unchanged"))
+                bi += 1
+                ci += 1
+            elif c_key not in baseline_map:
+                # Compare feature was deleted (not in baseline), emit deleted row
+                aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
+                ci += 1
+            elif b_key not in compare_map:
+                # Baseline feature is newer (not in compare), emit newer row
+                aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
+                bi += 1
+            else:
+                # Both exist in the other list but at different positions --
+                # the compare feature at this position was reordered; emit
+                # baseline feature as unchanged to maintain baseline order,
+                # it will be matched when compare catches up.
+                matched_cf = compare_map.get(b_key)
+                aligned_rows.append(AlignedRow(older=matched_cf, newer=bf, status="unchanged"))
+                bi += 1
+        elif bf:
+            # Only baseline features remain -- all newer
+            aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
+            bi += 1
+        elif cf:
+            # Only compare features remain -- all deleted
+            aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
+            ci += 1
+
     # Compute summary
     newer_count = sum(1 for e in diff_entries if e.status == "newer")
     deleted_count = sum(1 for e in diff_entries if e.status == "deleted")
@@ -169,7 +218,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
         "total_comparison": len(compare_features),
     }
 
-    return diff_entries, summary
+    return diff_entries, aligned_rows, summary
 
 
 def save_diff_json(diff_result: DiffResult) -> str:

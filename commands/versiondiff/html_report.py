@@ -58,11 +58,11 @@ HTML_CSS = """<style>
         letter-spacing: 0.5px;
         margin-bottom: 10px;
     }
-    .version-card.baseline .card-label {
-        color: #0984e3;
-    }
-    .version-card.comparison .card-label {
+    .version-card.older .card-label {
         color: #6c5ce7;
+    }
+    .version-card.newer .card-label {
+        color: #0984e3;
     }
     .version-card .version-number {
         font-size: 28px;
@@ -109,7 +109,7 @@ HTML_CSS = """<style>
         margin-right: 6px;
     }
 
-    /* Feature diff table */
+    /* Two-column diff table */
     .diff-table-wrap {
         background: #ffffff;
         border-radius: 8px;
@@ -126,10 +126,11 @@ HTML_CSS = """<style>
         width: 100%;
         border-collapse: collapse;
         font-size: 13px;
+        table-layout: fixed;
     }
     table.diff-table th {
         text-align: left;
-        padding: 10px 16px;
+        padding: 10px 12px;
         background: #f8f9fa;
         color: #636e72;
         font-size: 11px;
@@ -139,34 +140,86 @@ HTML_CSS = """<style>
         border-bottom: 2px solid #eee;
     }
     table.diff-table td {
-        padding: 9px 16px;
+        padding: 7px 12px;
         border-bottom: 1px solid #f0f0f0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     table.diff-table tr:last-child td {
         border-bottom: none;
     }
 
-    /* Row status styles */
-    tr.row-newer {
-        border-left: 4px solid #28a745;
-        background: #f6fff6;
+    /* Column header groups */
+    th.col-older {
+        background: #f3f0ff;
+        color: #6c5ce7;
     }
-    tr.row-deleted {
-        border-left: 4px solid #dc3545;
-        background: #fff6f6;
+    th.col-newer {
+        background: #eef6ff;
+        color: #0984e3;
     }
-    tr.row-unchanged {
-        border-left: 4px solid #dee2e6;
-        background: #ffffff;
+    th.col-status {
+        width: 80px;
+        text-align: center;
     }
 
-    /* Status badge in table */
+    /* Center divider between the two version columns */
+    td.col-divider, th.col-divider {
+        width: 80px;
+        text-align: center;
+        background: #fafafa;
+        border-left: 2px solid #eee;
+        border-right: 2px solid #eee;
+    }
+
+    /* Older side columns */
+    td.older-idx, th.older-idx { width: 36px; text-align: right; color: #999; }
+    td.older-name, th.older-name { }
+    td.older-type, th.older-type { width: 140px; color: #636e72; }
+
+    /* Newer side columns */
+    td.newer-idx, th.newer-idx { width: 36px; text-align: left; color: #999; }
+    td.newer-name, th.newer-name { }
+    td.newer-type, th.newer-type { width: 140px; color: #636e72; }
+
+    /* Row status styles */
+    tr.row-newer td.col-divider {
+        background: #d4edda;
+    }
+    tr.row-deleted td.col-divider {
+        background: #f8d7da;
+    }
+    tr.row-unchanged td.col-divider {
+        background: #f0f0f0;
+    }
+
+    tr.row-newer td.newer-name,
+    tr.row-newer td.newer-type,
+    tr.row-newer td.newer-idx {
+        background: #f6fff6;
+        font-weight: 600;
+    }
+
+    tr.row-deleted td.older-name,
+    tr.row-deleted td.older-type,
+    tr.row-deleted td.older-idx {
+        background: #fff6f6;
+        font-weight: 600;
+    }
+
+    /* Empty cell styling */
+    td.empty-cell {
+        background: #fafafa;
+    }
+
+    /* Status badge in divider */
     .status-badge {
         display: inline-block;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 11px;
-        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-size: 10px;
+        font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
@@ -180,7 +233,13 @@ HTML_CSS = """<style>
     }
     .status-unchanged {
         background: #e2e3e5;
-        color: #383d41;
+        color: #6b7075;
+    }
+
+    /* Arrow indicator */
+    .arrow {
+        font-size: 14px;
+        margin: 0 2px;
     }
 
     /* Footer */
@@ -226,39 +285,81 @@ def _build_summary_badges(summary: dict) -> str:
 </div>"""
 
 
-def _build_feature_table(features: list) -> str:
-    """Build the feature diff table HTML."""
-    rows = []
-    for entry in features:
-        row_class = f"row-{entry.status}"
-        status_class = f"status-{entry.status}"
-        status_label = entry.status.capitalize()
+def _build_two_column_table(diff_result: DiffResult) -> str:
+    """Build the two-column aligned diff table.
 
-        baseline_idx = str(entry.baseline_index) if entry.baseline_index is not None else "-"
-        compare_idx = str(entry.compare_index) if entry.compare_index is not None else "-"
+    Left column = older version, right column = newer version.
+    The comparison version goes left if it's older, right if newer.
+    Empty cells appear where a feature doesn't exist in that version.
+    """
+    older_is_comparison = diff_result.older_is_comparison
+
+    if older_is_comparison:
+        older_info = diff_result.comparison
+        newer_info = diff_result.baseline
+    else:
+        older_info = diff_result.baseline
+        newer_info = diff_result.comparison
+
+    older_label = f"V{older_info.version_number} (Older)"
+    newer_label = f"V{newer_info.version_number} (Newer)"
+
+    rows = []
+    for ar in diff_result.aligned_rows:
+        row_class = f"row-{ar.status}"
+        status_class = f"status-{ar.status}"
+        status_label = ar.status.upper()
+
+        # Older side cells
+        if ar.older:
+            older_idx = str(ar.older.index)
+            older_name = _escape_html(ar.older.name)
+            older_type = _escape_html(ar.older.feature_type)
+            older_cls = ""
+        else:
+            older_idx = ""
+            older_name = ""
+            older_type = ""
+            older_cls = " empty-cell"
+
+        # Newer side cells
+        if ar.newer:
+            newer_idx = str(ar.newer.index)
+            newer_name = _escape_html(ar.newer.name)
+            newer_type = _escape_html(ar.newer.feature_type)
+            newer_cls = ""
+        else:
+            newer_idx = ""
+            newer_name = ""
+            newer_type = ""
+            newer_cls = " empty-cell"
 
         rows.append(
             f'<tr class="{row_class}">'
-            f'<td><span class="status-badge {status_class}">{status_label}</span></td>'
-            f"<td>{_escape_html(entry.name)}</td>"
-            f"<td>{_escape_html(entry.feature_type)}</td>"
-            f"<td>{baseline_idx}</td>"
-            f"<td>{compare_idx}</td>"
+            f'<td class="older-idx{older_cls}">{older_idx}</td>'
+            f'<td class="older-name{older_cls}">{older_name}</td>'
+            f'<td class="older-type{older_cls}">{older_type}</td>'
+            f'<td class="col-divider"><span class="status-badge {status_class}">{status_label}</span></td>'
+            f'<td class="newer-idx{newer_cls}">{newer_idx}</td>'
+            f'<td class="newer-name{newer_cls}">{newer_name}</td>'
+            f'<td class="newer-type{newer_cls}">{newer_type}</td>'
             f"</tr>"
         )
 
     table_rows = "\n        ".join(rows)
 
     return f"""<div class="diff-table-wrap">
-    <h2>Timeline Feature Comparison</h2>
+    <h2>Timeline Comparison</h2>
     <table class="diff-table">
         <thead>
             <tr>
-                <th>Status</th>
-                <th>Feature Name</th>
-                <th>Feature Type</th>
-                <th>Baseline #</th>
-                <th>Compare #</th>
+                <th class="older-idx col-older">#</th>
+                <th class="older-name col-older">{_escape_html(older_label)}</th>
+                <th class="older-type col-older">Type</th>
+                <th class="col-divider col-status">Status</th>
+                <th class="newer-idx col-newer">#</th>
+                <th class="newer-name col-newer">{_escape_html(newer_label)}</th>
+                <th class="newer-type col-newer">Type</th>
             </tr>
         </thead>
         <tbody>
@@ -279,10 +380,16 @@ def generate_html_report(diff_result: DiffResult) -> str:
     """
     doc_name = _escape_html(diff_result.baseline.name)
 
-    baseline_card = _build_version_card(diff_result.baseline, "Current (Baseline)", "baseline")
-    compare_card = _build_version_card(diff_result.comparison, "Comparison", "comparison")
+    # Cards ordered left=older, right=newer to match the table columns
+    if diff_result.older_is_comparison:
+        left_card = _build_version_card(diff_result.comparison, "Older (Comparison)", "older")
+        right_card = _build_version_card(diff_result.baseline, "Newer (Current)", "newer")
+    else:
+        left_card = _build_version_card(diff_result.baseline, "Older (Current)", "older")
+        right_card = _build_version_card(diff_result.comparison, "Newer (Comparison)", "newer")
+
     summary_badges = _build_summary_badges(diff_result.summary)
-    feature_table = _build_feature_table(diff_result.features)
+    feature_table = _build_two_column_table(diff_result)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -294,12 +401,12 @@ def generate_html_report(diff_result: DiffResult) -> str:
 <body>
     <div class="report-header">
         <h1>{doc_name} - Version Diff Report</h1>
-        <div class="subtitle">Version {diff_result.baseline.version_number} (current) vs Version {diff_result.comparison.version_number}</div>
+        <div class="subtitle">Version {diff_result.baseline.version_number} (current) vs Version {diff_result.comparison.version_number} <span class="arrow">&larr; older</span></div>
     </div>
 
     <div class="version-cards">
-        {baseline_card}
-        {compare_card}
+        {left_card}
+        {right_card}
     </div>
 
     {summary_badges}
