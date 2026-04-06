@@ -2,7 +2,7 @@
 AppName=PowerTools-Version-Diff
 AppVersion=1.0
 AppPublisher=IMA LLC
-DefaultDirName={userappdata}\Autodesk\Autodesk Fusion\API\AddIns\PowerTools-Version-Diff
+DefaultDirName={userappdata}\Autodesk\Autodesk Fusion 360\API\AddIns\PowerTools-Version-Diff
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 OutputBaseFilename=PowerTools-Version-Diff-Setup
