@@ -1,0 +1,69 @@
+name: Build Installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  mac-installer:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare payload
+        run: |
+          ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
+          STAGING="/tmp/pkg-root/tmp/${ADDIN_NAME}-install/${ADDIN_NAME}"
+          mkdir -p "${STAGING}"
+          # Copy add-in source files, excluding build/installer artifacts
+          rsync -a --exclude='.git' --exclude='.github' --exclude='installer' --exclude='.gitignore' --exclude='LICENSE' . "${STAGING}/"
+
+      - name: Build .pkg
+        run: |
+          ADDIN_NAME="${GITHUB_REPOSITORY##*/}"
+          chmod +x installer/mac/postinstall
+          pkgbuild \
+            --root /tmp/pkg-root \
+            --scripts installer/mac \
+            --identifier "com.ima-llc.${ADDIN_NAME}" \
+            --version "${{ github.ref_name }}" \
+            --install-location / \
+            "${ADDIN_NAME}.pkg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: "*.pkg"
+
+  win-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build installer with Inno Setup
+        run: iscc installer/windows/installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-installer
+          path: installer/windows/Output/*.exe
+
+  release:
+    needs: [mac-installer, win-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/mac-installer/*.pkg
+            artifacts/win-installer/*.exe
+          generate_release_notes: true
