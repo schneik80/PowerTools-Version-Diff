@@ -1,0 +1,18 @@
+#!/bin/bash
+# postinstall script for PowerTools-Version-Diff Fusion add-in
+# Moves files from the pkg staging location to the user's Fusion AddIns directory.
+
+ADDIN_NAME="PowerTools-Version-Diff"
+STAGING_DIR="/tmp/${ADDIN_NAME}-install/${ADDIN_NAME}"
+TARGET_DIR="${HOME}/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/${ADDIN_NAME}"
+
+# Create target directory
+mkdir -p "${TARGET_DIR}"
+
+# Copy add-in files (overwrite existing)
+cp -R "${STAGING_DIR}/"* "${TARGET_DIR}/"
+
+# Clean up staging directory
+rm -rf "/tmp/${ADDIN_NAME}-install"
+
+exit 0
