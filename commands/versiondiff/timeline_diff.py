@@ -147,6 +147,16 @@ def _xref_version_detail(baseline_f, compare_f) -> str:
     return ""
 
 
+def _make_aligned_row(baseline_f: 'TimelineFeature', compare_f: 'TimelineFeature') -> AlignedRow:
+    """Create an AlignedRow for two matched features, detecting XREF version changes."""
+    if (baseline_f.feature_type == "XREF" and compare_f.feature_type == "XREF"
+            and baseline_f.component_version and compare_f.component_version
+            and baseline_f.component_version != compare_f.component_version):
+        detail = _xref_version_detail(baseline_f, compare_f)
+        return AlignedRow(older=compare_f, newer=baseline_f, status="version_changed", detail=detail)
+    return AlignedRow(older=compare_f, newer=baseline_f, status="unchanged")
+
+
 def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     """Compare two timeline feature lists and produce a diff.
 
@@ -224,11 +234,18 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
             ))
 
     # --- Build aligned rows for two-column view ---
+    # Track compare features already matched out-of-order so they aren't
+    # emitted a second time when the ci pointer reaches them.
     aligned_rows = []
+    consumed_compare_keys = set()
     bi = 0  # baseline pointer
     ci = 0  # compare pointer
 
     while bi < len(baseline_features) or ci < len(compare_features):
+        # Advance ci past any compare features already consumed out-of-order
+        while ci < len(compare_features) and _feature_key(compare_features[ci]) in consumed_compare_keys:
+            ci += 1
+
         bf = baseline_features[bi] if bi < len(baseline_features) else None
         cf = compare_features[ci] if ci < len(compare_features) else None
 
@@ -238,46 +255,35 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
 
             if b_key == c_key:
                 # Same feature in both -- check for XREF version change
-                if (bf.feature_type == "XREF" and cf.feature_type == "XREF"
-                        and bf.component_version and cf.component_version
-                        and bf.component_version != cf.component_version):
-                    detail = _xref_version_detail(bf, cf)
-                    aligned_rows.append(AlignedRow(
-                        older=cf, newer=bf, status="version_changed", detail=detail,
-                    ))
-                else:
-                    aligned_rows.append(AlignedRow(older=cf, newer=bf, status="unchanged"))
+                row = _make_aligned_row(bf, cf)
+                aligned_rows.append(row)
+                consumed_compare_keys.add(c_key)
                 bi += 1
                 ci += 1
             elif c_key not in baseline_map:
                 # Compare feature was deleted
                 aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
+                consumed_compare_keys.add(c_key)
                 ci += 1
             elif b_key not in compare_map:
                 # Baseline feature is newer
                 aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
                 bi += 1
             else:
-                # Both exist but at different positions -- reordered
+                # Both exist but at different positions -- reordered.
+                # Pull the matching compare feature out-of-order and mark consumed.
                 matched_cf = compare_map.get(b_key)
-                if (bf.feature_type == "XREF" and matched_cf
-                        and matched_cf.feature_type == "XREF"
-                        and bf.component_version and matched_cf.component_version
-                        and bf.component_version != matched_cf.component_version):
-                    detail = _xref_version_detail(bf, matched_cf)
-                    aligned_rows.append(AlignedRow(
-                        older=matched_cf, newer=bf, status="version_changed", detail=detail,
-                    ))
-                else:
-                    aligned_rows.append(AlignedRow(
-                        older=matched_cf, newer=bf, status="unchanged",
-                    ))
+                row = _make_aligned_row(bf, matched_cf)
+                aligned_rows.append(row)
+                consumed_compare_keys.add(b_key)
                 bi += 1
         elif bf:
             aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
             bi += 1
         elif cf:
-            aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
+            # Skip if already consumed
+            if _feature_key(cf) not in consumed_compare_keys:
+                aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
             ci += 1
 
     # Compute summary
