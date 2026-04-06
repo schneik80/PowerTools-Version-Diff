@@ -4,7 +4,7 @@
 
 ADDIN_NAME="PowerTools-Version-Diff"
 STAGING_DIR="/tmp/${ADDIN_NAME}-install/${ADDIN_NAME}"
-TARGET_DIR="${HOME}/Library/Application Support/Autodesk/Autodesk Fusion/API/AddIns/${ADDIN_NAME}"
+TARGET_DIR="${HOME}/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/${ADDIN_NAME}"
 
 # Create target directory
 mkdir -p "${TARGET_DIR}"
