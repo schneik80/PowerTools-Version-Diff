@@ -2,6 +2,7 @@ import json
 import os
 import secrets
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +27,12 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
         item = timeline.item(i)
 
         # Extract short type name from entity objectType
-        entity = item.entity
+        # Some timeline items have invalid/broken entities that raise RuntimeError
+        try:
+            entity = item.entity
+        except RuntimeError:
+            entity = None
+
         if entity is not None:
             full_type = entity.objectType  # e.g. "adsk::fusion::ExtrudeFeature"
             feature_type = full_type.split("::")[-1] if "::" in full_type else full_type
@@ -36,12 +42,15 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
             entity_type = ""
 
         # Map health state enum to string
-        health_map = {
-            adsk.fusion.FeatureHealthStates.HealthyFeatureHealthState: "Healthy",
-            adsk.fusion.FeatureHealthStates.WarningFeatureHealthState: "Warning",
-            adsk.fusion.FeatureHealthStates.ErrorFeatureHealthState: "Error",
-        }
-        health_str = health_map.get(item.healthState, "Unknown")
+        try:
+            health_map = {
+                adsk.fusion.FeatureHealthStates.HealthyFeatureHealthState: "Healthy",
+                adsk.fusion.FeatureHealthStates.WarningFeatureHealthState: "Warning",
+                adsk.fusion.FeatureHealthStates.ErrorFeatureHealthState: "Error",
+            }
+            health_str = health_map.get(item.healthState, "Unknown")
+        except RuntimeError:
+            health_str = "Unknown"
 
         features.append(TimelineFeature(
             name=item.name,
@@ -68,7 +77,7 @@ def get_version_info(data_file: adsk.core.DataFile) -> VersionInfo:
     """
     date_str = ""
     if data_file.dateModified:
-        date_str = data_file.dateModified.strftime("%Y-%m-%d %H:%M:%S")
+        date_str = datetime.fromtimestamp(data_file.dateModified).strftime("%Y-%m-%d %H:%M:%S")
 
     updated_by = ""
     if data_file.lastUpdatedBy:

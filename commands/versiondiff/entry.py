@@ -2,6 +2,7 @@ import adsk.core
 import adsk.fusion
 import os
 import traceback
+from datetime import datetime
 
 from ...lib import fusionAddInUtils as futil
 from ... import config
@@ -166,7 +167,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
         version_num = data_file.versionNumber
         date_str = ""
         if data_file.dateModified:
-            date_str = data_file.dateModified.strftime("%Y-%m-%d %H:%M:%S")
+            date_str = datetime.fromtimestamp(data_file.dateModified).strftime("%Y-%m-%d %H:%M:%S")
         updated_by = ""
         if data_file.lastUpdatedBy:
             updated_by = data_file.lastUpdatedBy.displayName
@@ -201,21 +202,36 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
         )
 
         current_version_num = data_file.versionNumber
-        for i in range(versions.count):
+        total_versions = versions.count
+
+        # Log status to the text command window (no dialog)
+        futil.log(f"Version Diff: loading {total_versions} versions...", force_console=True)
+
+        # Collect and sort versions by version number descending (newest first)
+        version_list = []
+        for i in range(total_versions):
             ver = versions.item(i)
             if ver.versionNumber == current_version_num:
                 continue
+            version_list.append(ver)
 
+        version_list.sort(key=lambda v: v.versionNumber, reverse=True)
+
+        is_first = True
+        for ver in version_list:
             ver_date = ""
             if ver.dateModified:
-                ver_date = ver.dateModified.strftime("%Y-%m-%d %H:%M")
+                ver_date = datetime.fromtimestamp(ver.dateModified).strftime("%Y-%m-%d %H:%M")
             ver_user = ""
             if ver.lastUpdatedBy:
                 ver_user = ver.lastUpdatedBy.displayName
 
             label = f"V{ver.versionNumber} - {ver_date} - {ver_user}"
-            dropdown.listItems.add(label, i == 0)
+            dropdown.listItems.add(label, is_first)
             _version_map[label] = ver
+            is_first = False
+
+        futil.log(f"Version Diff: loaded {len(version_list)} versions", force_console=True)
 
         # Connect event handlers
         futil.add_handler(
