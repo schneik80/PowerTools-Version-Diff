@@ -14,6 +14,8 @@ class TimelineFeature:
     is_rolled_back: bool
     health_state: str
     entity_type: str
+    component_name: str = ""       # For Occurrence (XREF) features: the referenced component name
+    component_version: str = ""    # For Occurrence (XREF) features: the source document version
 
 
 @dataclass
@@ -32,9 +34,10 @@ class DiffEntry:
     """A single entry in the timeline diff result."""
     name: str
     feature_type: str
-    status: str  # "newer" | "deleted" | "unchanged"
+    status: str  # "newer" | "deleted" | "unchanged" | "version_changed"
     baseline_index: Optional[int]
     compare_index: Optional[int]
+    detail: str = ""  # Extra info, e.g. version change description for XREFs
 
 
 @dataclass
@@ -46,7 +49,8 @@ class AlignedRow:
     """
     older: Optional[TimelineFeature]
     newer: Optional[TimelineFeature]
-    status: str  # "newer" | "deleted" | "unchanged"
+    status: str  # "newer" | "deleted" | "unchanged" | "version_changed"
+    detail: str = ""  # Extra info for version_changed rows
 
 
 @dataclass

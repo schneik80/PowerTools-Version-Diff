@@ -33,10 +33,33 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
         except RuntimeError:
             entity = None
 
+        component_name = ""
+        component_version = ""
+
         if entity is not None:
             full_type = entity.objectType  # e.g. "adsk::fusion::ExtrudeFeature"
             feature_type = full_type.split("::")[-1] if "::" in full_type else full_type
             entity_type = full_type
+
+            # For Occurrence (XREF) features, extract component name and version
+            if feature_type == "Occurrence":
+                feature_type = "XREF"
+                try:
+                    occ = adsk.fusion.Occurrence.cast(entity)
+                    if occ and occ.component:
+                        component_name = occ.component.name
+                        # Try to get source document version info
+                        try:
+                            src_file = occ.component.parentDesign.parentDocument.dataFile
+                            if src_file:
+                                component_version = f"V{src_file.versionNumber}"
+                        except:
+                            pass
+                        # If no external version, try to read from the occurrence name
+                        if not component_version:
+                            component_version = ""
+                except:
+                    pass
         else:
             feature_type = "Group" if item.isGroup else "Unknown"
             entity_type = ""
@@ -61,6 +84,8 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
             is_rolled_back=item.isRolledBack,
             health_state=health_str,
             entity_type=entity_type,
+            component_name=component_name,
+            component_version=component_version,
         ))
 
     return features
@@ -93,19 +118,44 @@ def get_version_info(data_file: adsk.core.DataFile) -> VersionInfo:
     )
 
 
+def _feature_key(f: TimelineFeature) -> tuple:
+    """Return the identity key for a feature.
+
+    For XREF (Occurrence) features, identity is based on component_name
+    so that the same component at different versions matches as one row.
+    For all other features, identity is (name, feature_type).
+    """
+    if f.feature_type == "XREF" and f.component_name:
+        return ("XREF", f.component_name)
+    return (f.name, f.feature_type)
+
+
+def _xref_version_detail(baseline_f, compare_f) -> str:
+    """Build a human-readable version change description for XREF features."""
+    old_ver = compare_f.component_version if compare_f else ""
+    new_ver = baseline_f.component_version if baseline_f else ""
+    if old_ver and new_ver and old_ver != new_ver:
+        return f"{old_ver} \u2192 {new_ver}"
+    if old_ver and not new_ver:
+        return old_ver
+    if new_ver and not old_ver:
+        return new_ver
+    return ""
+
+
 def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     """Compare two timeline feature lists and produce a diff.
 
-    Uses (name, feature_type) as the identity key for matching features.
-    Baseline is the current/newer version; comparison is the older version.
+    Uses (name, feature_type) as the identity key for most features.
+    For XREF (Occurrence) features, matches by component_name so that the
+    same component at different versions is shown on one row as
+    "version_changed" instead of delete + add.
 
-    - "newer": feature exists in baseline but not in comparison (added after comparison)
-    - "deleted": feature exists in comparison but not in baseline (removed since comparison)
-    - "unchanged": feature exists in both
-
-    Also produces aligned rows for the two-column report layout. Rows are
-    walked in timeline order, interleaving both sides so that matched features
-    share a row and unmatched features leave one side empty.
+    Statuses:
+    - "newer": feature exists in baseline but not in comparison
+    - "deleted": feature exists in comparison but not in baseline
+    - "unchanged": feature exists in both, no difference detected
+    - "version_changed": XREF with same component but different version
 
     Args:
         baseline_features: List of TimelineFeature from the current version.
@@ -114,31 +164,39 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     Returns:
         Tuple of (list[DiffEntry], list[AlignedRow], summary_dict).
     """
-    # Build lookup dicts keyed by (name, feature_type)
+    # Build lookup dicts keyed by identity key
     baseline_map = {}
     for f in baseline_features:
-        key = (f.name, f.feature_type)
-        baseline_map[key] = f
+        baseline_map[_feature_key(f)] = f
 
     compare_map = {}
     for f in compare_features:
-        key = (f.name, f.feature_type)
-        compare_map[key] = f
+        compare_map[_feature_key(f)] = f
 
     diff_entries = []
     seen_keys = set()
 
     # Walk baseline features in order
     for f in baseline_features:
-        key = (f.name, f.feature_type)
+        key = _feature_key(f)
         seen_keys.add(key)
 
         if key in compare_map:
-            status = "unchanged"
-            compare_index = compare_map[key].index
+            cf = compare_map[key]
+            # Check for XREF version change
+            if (f.feature_type == "XREF" and cf.feature_type == "XREF"
+                    and f.component_version and cf.component_version
+                    and f.component_version != cf.component_version):
+                status = "version_changed"
+                detail = _xref_version_detail(f, cf)
+            else:
+                status = "unchanged"
+                detail = ""
+            compare_index = cf.index
         else:
             status = "newer"
             compare_index = None
+            detail = ""
 
         diff_entries.append(DiffEntry(
             name=f.name,
@@ -146,11 +204,12 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
             status=status,
             baseline_index=f.index,
             compare_index=compare_index,
+            detail=detail,
         ))
 
     # Walk comparison features for deleted items
     for f in compare_features:
-        key = (f.name, f.feature_type)
+        key = _feature_key(f)
         if key not in seen_keys:
             diff_entries.append(DiffEntry(
                 name=f.name,
@@ -161,8 +220,6 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
             ))
 
     # --- Build aligned rows for two-column view ---
-    # Walk both timelines with two pointers, merging matched features
-    # into shared rows and inserting unmatched features with an empty side.
     aligned_rows = []
     bi = 0  # baseline pointer
     ci = 0  # compare pointer
@@ -172,36 +229,50 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
         cf = compare_features[ci] if ci < len(compare_features) else None
 
         if bf and cf:
-            b_key = (bf.name, bf.feature_type)
-            c_key = (cf.name, cf.feature_type)
+            b_key = _feature_key(bf)
+            c_key = _feature_key(cf)
 
             if b_key == c_key:
-                # Same feature in both -- unchanged row
-                aligned_rows.append(AlignedRow(older=cf, newer=bf, status="unchanged"))
+                # Same feature in both -- check for XREF version change
+                if (bf.feature_type == "XREF" and cf.feature_type == "XREF"
+                        and bf.component_version and cf.component_version
+                        and bf.component_version != cf.component_version):
+                    detail = _xref_version_detail(bf, cf)
+                    aligned_rows.append(AlignedRow(
+                        older=cf, newer=bf, status="version_changed", detail=detail,
+                    ))
+                else:
+                    aligned_rows.append(AlignedRow(older=cf, newer=bf, status="unchanged"))
                 bi += 1
                 ci += 1
             elif c_key not in baseline_map:
-                # Compare feature was deleted (not in baseline), emit deleted row
+                # Compare feature was deleted
                 aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
                 ci += 1
             elif b_key not in compare_map:
-                # Baseline feature is newer (not in compare), emit newer row
+                # Baseline feature is newer
                 aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
                 bi += 1
             else:
-                # Both exist in the other list but at different positions --
-                # the compare feature at this position was reordered; emit
-                # baseline feature as unchanged to maintain baseline order,
-                # it will be matched when compare catches up.
+                # Both exist but at different positions -- reordered
                 matched_cf = compare_map.get(b_key)
-                aligned_rows.append(AlignedRow(older=matched_cf, newer=bf, status="unchanged"))
+                if (bf.feature_type == "XREF" and matched_cf
+                        and matched_cf.feature_type == "XREF"
+                        and bf.component_version and matched_cf.component_version
+                        and bf.component_version != matched_cf.component_version):
+                    detail = _xref_version_detail(bf, matched_cf)
+                    aligned_rows.append(AlignedRow(
+                        older=matched_cf, newer=bf, status="version_changed", detail=detail,
+                    ))
+                else:
+                    aligned_rows.append(AlignedRow(
+                        older=matched_cf, newer=bf, status="unchanged",
+                    ))
                 bi += 1
         elif bf:
-            # Only baseline features remain -- all newer
             aligned_rows.append(AlignedRow(older=None, newer=bf, status="newer"))
             bi += 1
         elif cf:
-            # Only compare features remain -- all deleted
             aligned_rows.append(AlignedRow(older=cf, newer=None, status="deleted"))
             ci += 1
 
@@ -209,11 +280,13 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     newer_count = sum(1 for e in diff_entries if e.status == "newer")
     deleted_count = sum(1 for e in diff_entries if e.status == "deleted")
     unchanged_count = sum(1 for e in diff_entries if e.status == "unchanged")
+    version_changed_count = sum(1 for e in diff_entries if e.status == "version_changed")
 
     summary = {
         "newer": newer_count,
         "deleted": deleted_count,
         "unchanged": unchanged_count,
+        "version_changed": version_changed_count,
         "total_baseline": len(baseline_features),
         "total_comparison": len(compare_features),
     }

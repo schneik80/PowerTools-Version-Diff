@@ -104,6 +104,10 @@ HTML_CSS = """<style>
         background: #e2e3e5;
         color: #383d41;
     }
+    .badge-version_changed {
+        background: #fff3cd;
+        color: #856404;
+    }
     .badge .count {
         font-size: 16px;
         margin-right: 6px;
@@ -193,6 +197,9 @@ HTML_CSS = """<style>
     tr.row-unchanged td.col-divider {
         background: #f0f0f0;
     }
+    tr.row-version_changed td.col-divider {
+        background: #fff3cd;
+    }
 
     tr.row-newer td.newer-name,
     tr.row-newer td.newer-type,
@@ -206,6 +213,23 @@ HTML_CSS = """<style>
     tr.row-deleted td.older-idx {
         background: #fff6f6;
         font-weight: 600;
+    }
+
+    tr.row-version_changed td {
+        background: #fffde7;
+    }
+    tr.row-version_changed td.older-name,
+    tr.row-version_changed td.newer-name {
+        font-weight: 600;
+    }
+
+    /* Version change detail text */
+    .version-detail {
+        display: block;
+        font-size: 10px;
+        color: #856404;
+        font-weight: 400;
+        margin-top: 1px;
     }
 
     /* Empty cell styling */
@@ -234,6 +258,10 @@ HTML_CSS = """<style>
     .status-unchanged {
         background: #e2e3e5;
         color: #6b7075;
+    }
+    .status-version_changed {
+        background: #fff3cd;
+        color: #856404;
     }
 
     /* Arrow indicator */
@@ -278,9 +306,15 @@ def _build_version_card(info, label: str, css_class: str) -> str:
 
 def _build_summary_badges(summary: dict) -> str:
     """Build the summary badge row."""
+    version_changed = summary.get('version_changed', 0)
+    vc_badge = ""
+    if version_changed > 0:
+        vc_badge = f'<div class="badge badge-version_changed"><span class="count">{version_changed}</span> XREF Updated</div>'
+
     return f"""<div class="summary-row">
     <div class="badge badge-newer"><span class="count">{summary.get('newer', 0)}</span> Newer</div>
     <div class="badge badge-deleted"><span class="count">{summary.get('deleted', 0)}</span> Deleted</div>
+    {vc_badge}
     <div class="badge badge-unchanged"><span class="count">{summary.get('unchanged', 0)}</span> Unchanged</div>
 </div>"""
 
@@ -304,17 +338,33 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
     older_label = f"V{older_info.version_number} (Older)"
     newer_label = f"V{newer_info.version_number} (Newer)"
 
+    # Status label mapping for display
+    status_labels = {
+        "newer": "NEW",
+        "deleted": "DEL",
+        "unchanged": "SAME",
+        "version_changed": "VER \u0394",
+    }
+
     rows = []
     for ar in diff_result.aligned_rows:
         row_class = f"row-{ar.status}"
         status_class = f"status-{ar.status}"
-        status_label = ar.status.upper()
+        status_label = status_labels.get(ar.status, ar.status.upper())
+
+        # For version_changed rows, append version detail to the divider
+        divider_extra = ""
+        if ar.status == "version_changed" and ar.detail:
+            divider_extra = f'<br><span class="version-detail">{_escape_html(ar.detail)}</span>'
 
         # Older side cells
         if ar.older:
             older_idx = str(ar.older.index)
             older_name = _escape_html(ar.older.name)
             older_type = _escape_html(ar.older.feature_type)
+            # Show component version for XREFs
+            if ar.older.feature_type == "XREF" and ar.older.component_version:
+                older_name += f'<span class="version-detail">{_escape_html(ar.older.component_version)}</span>'
             older_cls = ""
         else:
             older_idx = ""
@@ -327,6 +377,9 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
             newer_idx = str(ar.newer.index)
             newer_name = _escape_html(ar.newer.name)
             newer_type = _escape_html(ar.newer.feature_type)
+            # Show component version for XREFs
+            if ar.newer.feature_type == "XREF" and ar.newer.component_version:
+                newer_name += f'<span class="version-detail">{_escape_html(ar.newer.component_version)}</span>'
             newer_cls = ""
         else:
             newer_idx = ""
@@ -339,7 +392,7 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
             f'<td class="older-idx{older_cls}">{older_idx}</td>'
             f'<td class="older-name{older_cls}">{older_name}</td>'
             f'<td class="older-type{older_cls}">{older_type}</td>'
-            f'<td class="col-divider"><span class="status-badge {status_class}">{status_label}</span></td>'
+            f'<td class="col-divider"><span class="status-badge {status_class}">{status_label}</span>{divider_extra}</td>'
             f'<td class="newer-idx{newer_cls}">{newer_idx}</td>'
             f'<td class="newer-name{newer_cls}">{newer_name}</td>'
             f'<td class="newer-type{newer_cls}">{newer_type}</td>'
