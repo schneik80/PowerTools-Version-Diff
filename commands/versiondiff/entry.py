@@ -6,6 +6,7 @@ from datetime import datetime
 
 from ...lib import fusionAddInUtils as futil
 from ... import config
+from .design_properties import extract_design_properties
 from .timeline_diff import walk_timeline, get_version_info, compute_diff, save_diff_json
 from .timeline_model import DiffResult
 from .html_report import generate_html_report
@@ -282,11 +283,12 @@ def command_execute(args: adsk.core.CommandEventArgs):
             ui.messageBox("Could not resolve the selected version.", CMD_NAME, 0, 3)
             return
 
-        # Walk baseline (current) timeline
+        # Walk baseline (current) timeline and extract design properties
         product = app.activeProduct
         design = adsk.fusion.Design.cast(product)
         baseline_features = walk_timeline(design.timeline)
         baseline_info = get_version_info(app.activeDocument.dataFile)
+        baseline_properties = extract_design_properties(design)
 
         futil.log(
             f"Baseline: V{baseline_info.version_number}, "
@@ -317,6 +319,7 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
         compare_features = walk_timeline(compare_design.timeline)
         compare_info = get_version_info(compare_data_file)
+        compare_properties = extract_design_properties(compare_design)
 
         futil.log(
             f"Comparison: V{compare_info.version_number}, "
@@ -340,6 +343,8 @@ def command_execute(args: adsk.core.CommandEventArgs):
             aligned_rows=aligned_rows,
             summary=summary,
             older_is_comparison=older_is_comparison,
+            baseline_properties=baseline_properties,
+            comparison_properties=compare_properties,
         )
 
         # Save JSON

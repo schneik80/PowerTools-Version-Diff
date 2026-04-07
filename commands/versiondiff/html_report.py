@@ -3,6 +3,7 @@ import secrets
 import tempfile
 from pathlib import Path
 
+from .feature_icons import icon_img_tag
 from .timeline_model import DiffResult
 
 
@@ -69,6 +70,24 @@ HTML_CSS = """<style>
         font-weight: 700;
         margin-bottom: 8px;
     }
+    .version-card .card-body {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+    }
+    .card-thumb {
+        width: 104px;
+        height: 78px;
+        object-fit: contain;
+        border-radius: 4px;
+        border: 1px solid #eee;
+        background: #f8f9fa;
+        flex-shrink: 0;
+    }
+    .card-details {
+        flex: 1;
+        min-width: 0;
+    }
     .version-card .detail {
         font-size: 12px;
         color: #636e72;
@@ -124,6 +143,10 @@ HTML_CSS = """<style>
     .filter-badge-version_changed {
         background: #fff3cd;
         color: #856404;
+    }
+    .filter-badge-sketch_modified {
+        background: #fde8d0;
+        color: #8a4b08;
     }
 
     /* Two-column diff table */
@@ -191,12 +214,12 @@ HTML_CSS = """<style>
     }
 
     /* Older side columns */
-    td.older-idx, th.older-idx { width: 36px; text-align: right; color: #999; }
+    td.older-idx, th.older-idx { width: 50px; text-align: right; color: #999; }
     td.older-name, th.older-name { }
     td.older-type, th.older-type { width: 140px; color: #636e72; }
 
     /* Newer side columns */
-    td.newer-idx, th.newer-idx { width: 36px; text-align: left; color: #999; }
+    td.newer-idx, th.newer-idx { width: 50px; text-align: left; color: #999; }
     td.newer-name, th.newer-name { }
     td.newer-type, th.newer-type { width: 140px; color: #636e72; }
 
@@ -217,23 +240,44 @@ HTML_CSS = """<style>
     tr.row-newer td.newer-name,
     tr.row-newer td.newer-type,
     tr.row-newer td.newer-idx {
-        background: #f6fff6;
+        background: #ecfaee;
         font-weight: 600;
     }
 
     tr.row-deleted td.older-name,
     tr.row-deleted td.older-type,
     tr.row-deleted td.older-idx {
-        background: #fff6f6;
+        background: #fdedee;
         font-weight: 600;
     }
 
-    tr.row-version_changed td {
+    tr.row-version_changed td.newer-idx,
+    tr.row-version_changed td.newer-name,
+    tr.row-version_changed td.newer-type {
         background: #fffde7;
-    }
-    tr.row-version_changed td.older-name,
-    tr.row-version_changed td.newer-name {
         font-weight: 600;
+    }
+
+    /* Sketch modified rows — only highlight the newer (changed) side */
+    tr.row-sketch_modified td.col-divider {
+        background: #fde8d0;
+    }
+    tr.row-sketch_modified td.newer-name,
+    tr.row-sketch_modified td.newer-type,
+    tr.row-sketch_modified td.newer-idx {
+        background: #fef5eb;
+        font-weight: 600;
+    }
+
+    /* Sketch change detail text (shown under feature name) */
+    .sketch-detail {
+        display: block;
+        font-size: 10px;
+        color: #8a4b08;
+        font-weight: 400;
+        margin-top: 1px;
+        white-space: normal;
+        line-height: 1.3;
     }
 
     /* Version change detail text */
@@ -276,11 +320,67 @@ HTML_CSS = """<style>
         background: #fff3cd;
         color: #856404;
     }
+    .status-sketch_modified {
+        background: #fde8d0;
+        color: #8a4b08;
+    }
 
     /* Arrow indicator */
     .arrow {
         font-size: 14px;
         margin: 0 2px;
+    }
+
+    /* Design Properties table */
+    .props-table-wrap {
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        overflow: hidden;
+        margin-bottom: 20px;
+    }
+    .props-table-wrap h2 {
+        font-size: 15px;
+        font-weight: 600;
+        padding: 14px 22px;
+        border-bottom: 1px solid #eee;
+    }
+    table.props-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        table-layout: fixed;
+    }
+    table.props-table th {
+        text-align: left;
+        padding: 10px 12px;
+        background: #f8f9fa;
+        color: #636e72;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        border-bottom: 2px solid #eee;
+    }
+    table.props-table th.prop-col-older { background: #f3f0ff; color: #6c5ce7; width: 35%; }
+    table.props-table th.prop-col-label { width: 30%; text-align: center; }
+    table.props-table th.prop-col-newer { background: #eef6ff; color: #0984e3; width: 35%; }
+    table.props-table td {
+        padding: 7px 12px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    table.props-table td.prop-label {
+        text-align: center;
+        font-weight: 600;
+        color: #636e72;
+        background: #fafafa;
+    }
+    table.props-table td.prop-changed {
+        background: #fef5eb;
+        font-weight: 600;
+    }
+    table.props-table tr:last-child td {
+        border-bottom: none;
     }
 
     /* Footer */
@@ -308,12 +408,27 @@ def _escape_html(text: str) -> str:
 def _build_version_card(info, label: str, css_class: str) -> str:
     """Build HTML for a version info card."""
     desc = _escape_html(info.description) if info.description else "<i>No description</i>"
+
+    # Thumbnail (embedded as base64 data URI)
+    thumb_html = ""
+    if getattr(info, "thumbnail_b64", ""):
+        thumb_html = (
+            f'<img class="card-thumb" '
+            f'src="data:image/png;base64,{info.thumbnail_b64}" '
+            f'alt="Version {info.version_number} thumbnail" />'
+        )
+
     return f"""<div class="version-card {css_class}">
     <div class="card-label">{label}</div>
-    <div class="version-number">Version {info.version_number}</div>
-    <div class="detail"><b>Date Saved:</b> {_escape_html(info.date_modified)}</div>
-    <div class="detail"><b>Saved By:</b> {_escape_html(info.last_updated_by)}</div>
-    <div class="detail"><b>Description:</b> {desc}</div>
+    <div class="card-body">
+        {thumb_html}
+        <div class="card-details">
+            <div class="version-number">Version {info.version_number}</div>
+            <div class="detail"><b>Date Saved:</b> {_escape_html(info.date_modified)}</div>
+            <div class="detail"><b>Saved By:</b> {_escape_html(info.last_updated_by)}</div>
+            <div class="detail"><b>Description:</b> {desc}</div>
+        </div>
+    </div>
 </div>"""
 
 
@@ -328,11 +443,121 @@ def _build_filter_badges(summary: dict) -> str:
             f'<span class="count">{version_changed}</span> XREF Updated</span>'
         )
 
+    sketch_modified = summary.get('sketch_modified', 0)
+    sk_badge = ""
+    if sketch_modified > 0:
+        sk_badge = (
+            f'<span class="filter-badge filter-badge-sketch_modified" '
+            f'data-filter="sketch_modified" onclick="toggleFilter(this)">'
+            f'<span class="count">{sketch_modified}</span> Sketch Modified</span>'
+        )
+
     return f"""<div class="filter-row">
     <span class="filter-badge filter-badge-newer" data-filter="newer" onclick="toggleFilter(this)"><span class="count">{summary.get('newer', 0)}</span> Newer</span>
     <span class="filter-badge filter-badge-deleted" data-filter="deleted" onclick="toggleFilter(this)"><span class="count">{summary.get('deleted', 0)}</span> Deleted</span>
     {vc_badge}
+    {sk_badge}
     <span class="filter-badge filter-badge-unchanged" data-filter="unchanged" onclick="toggleFilter(this)"><span class="count">{summary.get('unchanged', 0)}</span> Unchanged</span>
+</div>"""
+
+
+def _build_properties_table(diff_result: DiffResult) -> str:
+    """Build the Design Properties comparison table.
+
+    Shows material, appearances, mass properties and extents side-by-side
+    for the older and newer versions, highlighting changed values.
+    """
+    older_props = (
+        diff_result.comparison_properties
+        if diff_result.older_is_comparison
+        else diff_result.baseline_properties
+    )
+    newer_props = (
+        diff_result.baseline_properties
+        if diff_result.older_is_comparison
+        else diff_result.comparison_properties
+    )
+
+    if not older_props and not newer_props:
+        return ""
+
+    older_info = (
+        diff_result.comparison if diff_result.older_is_comparison else diff_result.baseline
+    )
+    newer_info = (
+        diff_result.baseline if diff_result.older_is_comparison else diff_result.comparison
+    )
+
+    def _fmt(val, decimals=3):
+        """Format a float to fixed decimals."""
+        if val is None:
+            return "—"
+        return f"{val:.{decimals}f}"
+
+    def _fmt_tuple(t, decimals=3):
+        """Format a 3-tuple of floats."""
+        if not t:
+            return "—"
+        return f"({_fmt(t[0], decimals)}, {_fmt(t[1], decimals)}, {_fmt(t[2], decimals)})"
+
+    def _extents(bbox_min, bbox_max, decimals=3):
+        """Compute extents string from bbox min/max."""
+        if not bbox_min or not bbox_max:
+            return "—"
+        w = abs(bbox_max[0] - bbox_min[0])
+        h = abs(bbox_max[1] - bbox_min[1])
+        d = abs(bbox_max[2] - bbox_min[2])
+        return f"{_fmt(w, decimals)} × {_fmt(h, decimals)} × {_fmt(d, decimals)}"
+
+    def _row(label, older_val, newer_val, unit=""):
+        """Build a table row, highlighting only the newer column if values differ."""
+        o_str = _escape_html(str(older_val)) + (f" {unit}" if unit and older_val != "—" else "")
+        n_str = _escape_html(str(newer_val)) + (f" {unit}" if unit and newer_val != "—" else "")
+        changed = str(older_val) != str(newer_val)
+        n_cls = ' class="prop-changed"' if changed else ""
+        return (
+            f"<tr>"
+            f"<td>{o_str}</td>"
+            f'<td class="prop-label">{_escape_html(label)}</td>'
+            f'<td{n_cls}>{n_str}</td>'
+            f"</tr>"
+        )
+
+    # Prepare values (use safe defaults if a side is missing)
+    op = older_props or type(newer_props)()
+    np_ = newer_props or type(older_props)()
+
+    rows = []
+    rows.append(_row("Material", op.material or "—", np_.material or "—"))
+    rows.append(_row("Appearances",
+                     ", ".join(op.body_appearances) if op.body_appearances else "—",
+                     ", ".join(np_.body_appearances) if np_.body_appearances else "—"))
+    rows.append(_row("Bodies", op.body_count, np_.body_count))
+    rows.append(_row("Mass", _fmt(op.mass, 6), _fmt(np_.mass, 6), "kg"))
+    rows.append(_row("Volume", _fmt(op.volume, 3), _fmt(np_.volume, 3), "cm³"))
+    rows.append(_row("Area", _fmt(op.area, 3), _fmt(np_.area, 3), "cm²"))
+    rows.append(_row("Density", _fmt(op.density, 6), _fmt(np_.density, 6), "kg/cm³"))
+    rows.append(_row("Center of Mass", _fmt_tuple(op.center_of_mass, 4), _fmt_tuple(np_.center_of_mass, 4), "cm"))
+    rows.append(_row("Extents (W × H × D)",
+                     _extents(op.bbox_min, op.bbox_max),
+                     _extents(np_.bbox_min, np_.bbox_max), "cm"))
+
+    table_rows = "\n        ".join(rows)
+
+    return f"""<div class="props-table-wrap">
+    <h2>Design Properties</h2>
+    <table class="props-table">
+        <thead>
+            <tr>
+                <th class="prop-col-older">V{older_info.version_number} (Older)</th>
+                <th class="prop-col-label">Property</th>
+                <th class="prop-col-newer">V{newer_info.version_number} (Newer)</th>
+            </tr>
+        </thead>
+        <tbody>
+        {table_rows}
+        </tbody>
+    </table>
 </div>"""
 
 
@@ -361,6 +586,7 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
         "deleted": "DEL",
         "unchanged": "SAME",
         "version_changed": "VER \u0394",
+        "sketch_modified": "SK \u0394",
     }
 
     rows = []
@@ -377,7 +603,8 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
         # Older side cells
         if ar.older:
             older_idx = str(ar.older.index)
-            older_name = _escape_html(ar.older.name)
+            older_icon = icon_img_tag(ar.older.feature_type)
+            older_name = older_icon + _escape_html(ar.older.name)
             older_type = _escape_html(ar.older.feature_type)
             # Show component version for XREFs
             if ar.older.feature_type == "XREF" and ar.older.component_version:
@@ -392,11 +619,15 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
         # Newer side cells
         if ar.newer:
             newer_idx = str(ar.newer.index)
-            newer_name = _escape_html(ar.newer.name)
+            newer_icon = icon_img_tag(ar.newer.feature_type)
+            newer_name = newer_icon + _escape_html(ar.newer.name)
             newer_type = _escape_html(ar.newer.feature_type)
             # Show component version for XREFs
             if ar.newer.feature_type == "XREF" and ar.newer.component_version:
                 newer_name += f'<span class="version-detail">{_escape_html(ar.newer.component_version)}</span>'
+            # Show sketch change detail under the name
+            if ar.status == "sketch_modified" and ar.sketch_detail:
+                newer_name += f'<span class="sketch-detail">{_escape_html(ar.sketch_detail)}</span>'
             newer_cls = ""
         else:
             newer_idx = ""
@@ -459,6 +690,7 @@ def generate_html_report(diff_result: DiffResult) -> str:
         right_card = _build_version_card(diff_result.comparison, "Newer (Comparison)", "newer")
 
     filter_badges = _build_filter_badges(diff_result.summary)
+    properties_table = _build_properties_table(diff_result)
     feature_table = _build_two_column_table(diff_result)
 
     filter_js = """<script>
@@ -499,6 +731,8 @@ function applyFilters() {
         {left_card}
         {right_card}
     </div>
+
+    {properties_table}
 
     {filter_badges}
     <div style="font-size:11px;color:#999;margin:-14px 0 16px 2px;">Click a badge to show or hide those rows</div>

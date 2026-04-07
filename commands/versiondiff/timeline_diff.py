@@ -10,6 +10,7 @@ from typing import Optional
 import adsk.core
 import adsk.fusion
 
+from .sketch_hash import extract_sketch_fingerprint, sketch_change_detail
 from .timeline_model import TimelineFeature, VersionInfo, DiffEntry, DiffResult, AlignedRow
 
 # Pattern to parse Occurrence names like "Center Diff Mount v2:1"
@@ -79,6 +80,11 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
         except RuntimeError:
             health_str = "Unknown"
 
+        # Extract sketch fingerprint for change detection across versions
+        sketch_fp = None
+        if feature_type == "Sketch" and entity is not None:
+            sketch_fp = extract_sketch_fingerprint(entity)
+
         features.append(TimelineFeature(
             name=item.name,
             feature_type=feature_type,
@@ -90,6 +96,7 @@ def walk_timeline(timeline: adsk.fusion.Timeline) -> list:
             entity_type=entity_type,
             component_name=component_name,
             component_version=component_version,
+            sketch_fingerprint=sketch_fp,
         ))
 
     return features
@@ -112,6 +119,19 @@ def get_version_info(data_file: adsk.core.DataFile) -> VersionInfo:
     if data_file.lastUpdatedBy:
         updated_by = data_file.lastUpdatedBy.displayName
 
+    # Capture thumbnail as base64-encoded PNG for embedding in the HTML report.
+    # DataFile.thumbnail returns a DataObjectFuture; .dataObject.getAsBase64String()
+    # returns the PNG already base64-encoded when state == 1 (ready).
+    thumbnail_b64 = ""
+    try:
+        thumb_future = getattr(data_file, "thumbnail", None)
+        if thumb_future is not None:
+            thumb_obj = getattr(thumb_future, "dataObject", None)
+            if thumb_obj is not None:
+                thumbnail_b64 = thumb_obj.getAsBase64String()
+    except Exception:
+        pass
+
     return VersionInfo(
         version_number=data_file.versionNumber,
         version_id=data_file.versionId,
@@ -119,6 +139,7 @@ def get_version_info(data_file: adsk.core.DataFile) -> VersionInfo:
         date_modified=date_str,
         last_updated_by=updated_by,
         description=data_file.description or "",
+        thumbnail_b64=thumbnail_b64,
     )
 
 
@@ -148,12 +169,24 @@ def _xref_version_detail(baseline_f, compare_f) -> str:
 
 
 def _make_aligned_row(baseline_f: 'TimelineFeature', compare_f: 'TimelineFeature') -> AlignedRow:
-    """Create an AlignedRow for two matched features, detecting XREF version changes."""
+    """Create an AlignedRow for two matched features, detecting XREF version and sketch changes."""
+    # Check for XREF version change
     if (baseline_f.feature_type == "XREF" and compare_f.feature_type == "XREF"
             and baseline_f.component_version and compare_f.component_version
             and baseline_f.component_version != compare_f.component_version):
         detail = _xref_version_detail(baseline_f, compare_f)
         return AlignedRow(older=compare_f, newer=baseline_f, status="version_changed", detail=detail)
+
+    # Check for sketch modification via fingerprint
+    if (baseline_f.feature_type == "Sketch" and compare_f.feature_type == "Sketch"
+            and baseline_f.sketch_fingerprint and compare_f.sketch_fingerprint
+            and baseline_f.sketch_fingerprint.revision_id != compare_f.sketch_fingerprint.revision_id):
+        sk_detail = sketch_change_detail(compare_f.sketch_fingerprint, baseline_f.sketch_fingerprint)
+        return AlignedRow(
+            older=compare_f, newer=baseline_f,
+            status="sketch_modified", sketch_detail=sk_detail,
+        )
+
     return AlignedRow(older=compare_f, newer=baseline_f, status="unchanged")
 
 
@@ -170,6 +203,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     - "deleted": feature exists in comparison but not in baseline
     - "unchanged": feature exists in both, no difference detected
     - "version_changed": XREF with same component but different version
+    - "sketch_modified": Sketch with same name but different revisionId
 
     Args:
         baseline_features: List of TimelineFeature from the current version.
@@ -203,6 +237,12 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
                     and f.component_version != cf.component_version):
                 status = "version_changed"
                 detail = _xref_version_detail(f, cf)
+            # Check for sketch modification
+            elif (f.feature_type == "Sketch" and cf.feature_type == "Sketch"
+                    and f.sketch_fingerprint and cf.sketch_fingerprint
+                    and f.sketch_fingerprint.revision_id != cf.sketch_fingerprint.revision_id):
+                status = "sketch_modified"
+                detail = sketch_change_detail(cf.sketch_fingerprint, f.sketch_fingerprint)
             else:
                 status = "unchanged"
                 detail = ""
@@ -291,12 +331,14 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     deleted_count = sum(1 for e in diff_entries if e.status == "deleted")
     unchanged_count = sum(1 for e in diff_entries if e.status == "unchanged")
     version_changed_count = sum(1 for e in diff_entries if e.status == "version_changed")
+    sketch_modified_count = sum(1 for e in diff_entries if e.status == "sketch_modified")
 
     summary = {
         "newer": newer_count,
         "deleted": deleted_count,
         "unchanged": unchanged_count,
         "version_changed": version_changed_count,
+        "sketch_modified": sketch_modified_count,
         "total_baseline": len(baseline_features),
         "total_comparison": len(compare_features),
     }

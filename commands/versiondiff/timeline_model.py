@@ -16,6 +16,7 @@ class TimelineFeature:
     entity_type: str
     component_name: str = ""       # For Occurrence (XREF) features: the referenced component name
     component_version: str = ""    # For Occurrence (XREF) features: the source document version
+    sketch_fingerprint: object = None  # Optional[SketchFingerprint] — set for Sketch features
 
 
 @dataclass
@@ -27,6 +28,7 @@ class VersionInfo:
     date_modified: str
     last_updated_by: str
     description: str
+    thumbnail_b64: str = ""  # Base64-encoded PNG thumbnail (data URI payload)
 
 
 @dataclass
@@ -49,8 +51,9 @@ class AlignedRow:
     """
     older: Optional[TimelineFeature]
     newer: Optional[TimelineFeature]
-    status: str  # "newer" | "deleted" | "unchanged" | "version_changed"
+    status: str  # "newer" | "deleted" | "unchanged" | "version_changed" | "sketch_modified"
     detail: str = ""  # Extra info for version_changed rows
+    sketch_detail: str = ""  # Count delta summary for sketch_modified rows
 
 
 @dataclass
@@ -62,6 +65,8 @@ class DiffResult:
     aligned_rows: list = field(default_factory=list)   # list[AlignedRow]
     summary: dict = field(default_factory=dict)
     older_is_comparison: bool = True  # True when comparison is older than baseline
+    baseline_properties: object = None   # Optional[DesignProperties]
+    comparison_properties: object = None # Optional[DesignProperties]
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)
