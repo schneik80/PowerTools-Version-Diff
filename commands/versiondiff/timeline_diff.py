@@ -10,6 +10,7 @@ from typing import Optional
 import adsk.core
 import adsk.fusion
 
+from .param_fingerprint import param_change_detail, params_differ
 from .sketch_hash import extract_sketch_fingerprint, sketch_change_detail
 from .timeline_model import TimelineFeature, VersionInfo, DiffEntry, DiffResult, AlignedRow
 
@@ -187,6 +188,16 @@ def _make_aligned_row(baseline_f: 'TimelineFeature', compare_f: 'TimelineFeature
             status="sketch_modified", sketch_detail=sk_detail,
         )
 
+    # Check for parameter changes on any feature type
+    if (baseline_f.feature_params and compare_f.feature_params
+            and params_differ(compare_f.feature_params, baseline_f.feature_params)):
+        p_detail = param_change_detail(compare_f.feature_params, baseline_f.feature_params)
+        if p_detail:
+            return AlignedRow(
+                older=compare_f, newer=baseline_f,
+                status="params_changed", params_detail=p_detail,
+            )
+
     return AlignedRow(older=compare_f, newer=baseline_f, status="unchanged")
 
 
@@ -204,6 +215,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     - "unchanged": feature exists in both, no difference detected
     - "version_changed": XREF with same component but different version
     - "sketch_modified": Sketch with same name but different revisionId
+    - "params_changed": Feature exists in both but parameter values differ
 
     Args:
         baseline_features: List of TimelineFeature from the current version.
@@ -243,6 +255,16 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
                     and f.sketch_fingerprint.revision_id != cf.sketch_fingerprint.revision_id):
                 status = "sketch_modified"
                 detail = sketch_change_detail(cf.sketch_fingerprint, f.sketch_fingerprint)
+            # Check for parameter changes
+            elif (f.feature_params and cf.feature_params
+                    and f.feature_params != cf.feature_params):
+                p_detail = param_change_detail(cf.feature_params, f.feature_params)
+                if p_detail:
+                    status = "params_changed"
+                    detail = p_detail
+                else:
+                    status = "unchanged"
+                    detail = ""
             else:
                 status = "unchanged"
                 detail = ""
@@ -332,6 +354,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     unchanged_count = sum(1 for e in diff_entries if e.status == "unchanged")
     version_changed_count = sum(1 for e in diff_entries if e.status == "version_changed")
     sketch_modified_count = sum(1 for e in diff_entries if e.status == "sketch_modified")
+    params_changed_count = sum(1 for e in diff_entries if e.status == "params_changed")
 
     summary = {
         "newer": newer_count,
@@ -339,6 +362,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
         "unchanged": unchanged_count,
         "version_changed": version_changed_count,
         "sketch_modified": sketch_modified_count,
+        "params_changed": params_changed_count,
         "total_baseline": len(baseline_features),
         "total_comparison": len(compare_features),
     }

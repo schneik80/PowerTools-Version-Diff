@@ -17,6 +17,7 @@ class TimelineFeature:
     component_name: str = ""       # For Occurrence (XREF) features: the referenced component name
     component_version: str = ""    # For Occurrence (XREF) features: the source document version
     sketch_fingerprint: object = None  # Optional[SketchFingerprint] — set for Sketch features
+    feature_params: dict = None        # Optional[dict] — {param_name: (expression, role)}
 
 
 @dataclass
@@ -51,9 +52,10 @@ class AlignedRow:
     """
     older: Optional[TimelineFeature]
     newer: Optional[TimelineFeature]
-    status: str  # "newer" | "deleted" | "unchanged" | "version_changed" | "sketch_modified"
+    status: str  # "newer" | "deleted" | "unchanged" | "version_changed" | "sketch_modified" | "params_changed"
     detail: str = ""  # Extra info for version_changed rows
     sketch_detail: str = ""  # Count delta summary for sketch_modified rows
+    params_detail: str = ""  # Parameter change summary for params_changed rows
 
 
 @dataclass

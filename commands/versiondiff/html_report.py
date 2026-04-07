@@ -148,6 +148,10 @@ HTML_CSS = """<style>
         background: #fde8d0;
         color: #8a4b08;
     }
+    .filter-badge-params_changed {
+        background: #d6eaf8;
+        color: #1a5276;
+    }
 
     /* Two-column diff table */
     .diff-table-wrap {
@@ -269,11 +273,33 @@ HTML_CSS = """<style>
         font-weight: 600;
     }
 
+    /* Parameter changed rows — only highlight the newer (changed) side */
+    tr.row-params_changed td.col-divider {
+        background: #d6eaf8;
+    }
+    tr.row-params_changed td.newer-name,
+    tr.row-params_changed td.newer-type,
+    tr.row-params_changed td.newer-idx {
+        background: #ebf5fb;
+        font-weight: 600;
+    }
+
     /* Sketch change detail text (shown under feature name) */
     .sketch-detail {
         display: block;
         font-size: 10px;
         color: #8a4b08;
+        font-weight: 400;
+        margin-top: 1px;
+        white-space: normal;
+        line-height: 1.3;
+    }
+
+    /* Parameter change detail text (shown under feature name) */
+    .params-detail {
+        display: block;
+        font-size: 10px;
+        color: #1a5276;
         font-weight: 400;
         margin-top: 1px;
         white-space: normal;
@@ -323,6 +349,10 @@ HTML_CSS = """<style>
     .status-sketch_modified {
         background: #fde8d0;
         color: #8a4b08;
+    }
+    .status-params_changed {
+        background: #d6eaf8;
+        color: #1a5276;
     }
 
     /* Arrow indicator */
@@ -381,6 +411,13 @@ HTML_CSS = """<style>
     }
     table.props-table tr:last-child td {
         border-bottom: none;
+    }
+
+    /* Table heading summary */
+    .table-summary {
+        font-size: 12px;
+        font-weight: 400;
+        color: #636e72;
     }
 
     /* Footer */
@@ -452,11 +489,21 @@ def _build_filter_badges(summary: dict) -> str:
             f'<span class="count">{sketch_modified}</span> Sketch Modified</span>'
         )
 
+    params_changed = summary.get('params_changed', 0)
+    prm_badge = ""
+    if params_changed > 0:
+        prm_badge = (
+            f'<span class="filter-badge filter-badge-params_changed" '
+            f'data-filter="params_changed" onclick="toggleFilter(this)">'
+            f'<span class="count">{params_changed}</span> Params Changed</span>'
+        )
+
     return f"""<div class="filter-row">
     <span class="filter-badge filter-badge-newer" data-filter="newer" onclick="toggleFilter(this)"><span class="count">{summary.get('newer', 0)}</span> Newer</span>
     <span class="filter-badge filter-badge-deleted" data-filter="deleted" onclick="toggleFilter(this)"><span class="count">{summary.get('deleted', 0)}</span> Deleted</span>
     {vc_badge}
     {sk_badge}
+    {prm_badge}
     <span class="filter-badge filter-badge-unchanged" data-filter="unchanged" onclick="toggleFilter(this)"><span class="count">{summary.get('unchanged', 0)}</span> Unchanged</span>
 </div>"""
 
@@ -544,8 +591,34 @@ def _build_properties_table(diff_result: DiffResult) -> str:
 
     table_rows = "\n        ".join(rows)
 
+    # Build a plain-English summary of what changed
+    changed_props = []
+    if (op.material or "—") != (np_.material or "—"):
+        changed_props.append("material")
+    if (op.body_appearances or []) != (np_.body_appearances or []):
+        changed_props.append("appearance")
+    if _fmt(op.mass, 6) != _fmt(np_.mass, 6):
+        changed_props.append("mass")
+    if _fmt(op.volume, 3) != _fmt(np_.volume, 3):
+        changed_props.append("volume")
+    if _fmt(op.area, 3) != _fmt(np_.area, 3):
+        changed_props.append("area")
+    if _fmt(op.density, 6) != _fmt(np_.density, 6):
+        changed_props.append("density")
+    if _fmt_tuple(op.center_of_mass, 4) != _fmt_tuple(np_.center_of_mass, 4):
+        changed_props.append("center of mass")
+    if _extents(op.bbox_min, op.bbox_max) != _extents(np_.bbox_min, np_.bbox_max):
+        changed_props.append("extents")
+    if op.body_count != np_.body_count:
+        changed_props.append("body count")
+
+    if changed_props:
+        props_summary = _escape_html(", ".join(changed_props)) + " changed"
+    else:
+        props_summary = "no changes detected"
+
     return f"""<div class="props-table-wrap">
-    <h2>Design Properties</h2>
+    <h2>Design Properties <span class="table-summary">&mdash; {props_summary}</span></h2>
     <table class="props-table">
         <thead>
             <tr>
@@ -587,6 +660,7 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
         "unchanged": "SAME",
         "version_changed": "VER \u0394",
         "sketch_modified": "SK \u0394",
+        "params_changed": "PRM \u0394",
     }
 
     rows = []
@@ -628,6 +702,9 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
             # Show sketch change detail under the name
             if ar.status == "sketch_modified" and ar.sketch_detail:
                 newer_name += f'<span class="sketch-detail">{_escape_html(ar.sketch_detail)}</span>'
+            # Show parameter change detail under the name
+            if ar.status == "params_changed" and ar.params_detail:
+                newer_name += f'<span class="params-detail">{_escape_html(ar.params_detail)}</span>'
             newer_cls = ""
         else:
             newer_idx = ""
@@ -649,8 +726,44 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
 
     table_rows = "\n        ".join(rows)
 
+    # Build a plain-English summary of changes by feature type
+    changed_statuses = {"newer", "deleted", "version_changed", "sketch_modified", "params_changed"}
+    type_counts: dict[str, int] = {}
+    total_changed = 0
+    for ar in diff_result.aligned_rows:
+        if ar.status in changed_statuses:
+            total_changed += 1
+            # Use the feature type from whichever side exists
+            ft = (ar.newer or ar.older).feature_type if (ar.newer or ar.older) else "Unknown"
+            # Normalize to readable names
+            if ft == "Sketch":
+                label = "sketch"
+            elif ft == "XREF":
+                label = "component ref"
+            elif ft in ("Joint", "AsBuiltJoint", "JointOrigin"):
+                label = "joint"
+            elif ft in ("ConstructionAxis", "ConstructionPlane", "ConstructionPoint"):
+                label = "construction"
+            elif ft.endswith("Feature"):
+                label = "feature"
+            else:
+                label = "feature"
+            type_counts[label] = type_counts.get(label, 0) + 1
+
+    if total_changed == 0:
+        timeline_summary = "no changes"
+    else:
+        parts = []
+        parts.append(f"{total_changed} total")
+        for label in ["feature", "sketch", "component ref", "joint", "construction"]:
+            if label in type_counts:
+                count = type_counts[label]
+                plural = label + ("es" if label.endswith("ch") else "s")
+                parts.append(f"{count} {plural if count != 1 else label}")
+        timeline_summary = ", ".join(parts)
+
     return f"""<div class="diff-table-wrap">
-    <h2>Timeline Comparison</h2>
+    <h2>Timeline Comparison <span class="table-summary">&mdash; {_escape_html(timeline_summary)}</span></h2>
     <table class="diff-table">
         <thead>
             <tr>

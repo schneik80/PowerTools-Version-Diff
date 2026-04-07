@@ -7,6 +7,7 @@ from datetime import datetime
 from ...lib import fusionAddInUtils as futil
 from ... import config
 from .design_properties import extract_design_properties
+from .param_fingerprint import extract_feature_params, attach_params_to_features
 from .timeline_diff import walk_timeline, get_version_info, compute_diff, save_diff_json
 from .timeline_model import DiffResult
 from .html_report import generate_html_report
@@ -204,6 +205,135 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
                 1, True,
             )
 
+            # --- Version Summary group (collapsed by default) ---
+            progress.message = "Version Diff — Gathering version summary..."
+            adsk.doEvents()
+
+            summary_group = inputs.addGroupCommandInput("version_summary", "Version Summary")
+            summary_group.isEnabledCheckBoxDisplayed = False
+            summary_group.isExpanded = False
+
+            sg = summary_group.children
+
+            # Walk all versions to gather stats
+            total_versions = versions.count
+            unique_users = set()
+            earliest_date = None
+            latest_date = None
+            latest_user = ""
+            milestone_count = 0
+            latest_is_milestone = False
+
+            for i in range(total_versions):
+                ver = versions.item(i)
+                if ver.lastUpdatedBy:
+                    unique_users.add(ver.lastUpdatedBy.displayName)
+                if ver.dateModified:
+                    d = ver.dateModified
+                    if earliest_date is None or d < earliest_date:
+                        earliest_date = d
+                    if latest_date is None or d > latest_date:
+                        latest_date = d
+                        latest_user = ver.lastUpdatedBy.displayName if ver.lastUpdatedBy else ""
+                try:
+                    if ver.isMilestone:
+                        milestone_count += 1
+                        if ver.versionNumber == data_file.latestVersionNumber:
+                            latest_is_milestone = True
+                except Exception:
+                    pass
+
+            # Revisions come from the milestones collection.
+            # Each Milestone has a name and a linked version.
+            # Auto-generated names like "Milestone V7" or "Item Update"
+            # are not revisions — real revisions have short labels like "A", "B", "C".
+            _auto_milestone_prefixes = ("Milestone ", "Item Update")
+            revision_count = 0
+            latest_revision_label = ""
+            latest_is_revision = False
+            try:
+                mss = data_file.milestones
+                for i in range(mss.count):
+                    ms = mss.item(i)
+                    ms_name = ms.name or ""
+                    is_auto = any(ms_name.startswith(p) for p in _auto_milestone_prefixes)
+                    if not is_auto and ms_name:
+                        revision_count += 1
+                        # Check if this revision is on the latest version
+                        try:
+                            if ms.version and ms.version.versionNumber == data_file.latestVersionNumber:
+                                latest_is_revision = True
+                                latest_revision_label = ms_name
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Public share link
+            has_public_link = False
+            try:
+                shared = getattr(data_file, "sharedLink", None)
+                if shared and shared.isShared:
+                    has_public_link = True
+            except Exception:
+                pass
+
+            # Populate summary fields
+            sg.addTextBoxCommandInput(
+                "sum_versions", "Versions",
+                str(total_versions),
+                1, True,
+            )
+            if earliest_date:
+                sg.addTextBoxCommandInput(
+                    "sum_created", "Created",
+                    datetime.fromtimestamp(earliest_date).strftime("%Y-%m-%d %H:%M:%S"),
+                    1, True,
+                )
+            if latest_date:
+                sg.addTextBoxCommandInput(
+                    "sum_last_saved", "Last Saved",
+                    datetime.fromtimestamp(latest_date).strftime("%Y-%m-%d %H:%M:%S"),
+                    1, True,
+                )
+            if latest_user:
+                sg.addTextBoxCommandInput(
+                    "sum_last_user", "Last Saved By",
+                    latest_user,
+                    1, True,
+                )
+            sg.addTextBoxCommandInput(
+                "sum_users", "Contributors",
+                f"{len(unique_users)} user{'s' if len(unique_users) != 1 else ''}",
+                1, True,
+            )
+            sg.addTextBoxCommandInput(
+                "sum_milestones", "Milestones",
+                str(milestone_count),
+                1, True,
+            )
+            sg.addTextBoxCommandInput(
+                "sum_latest_ms", "Latest Is Milestone",
+                "Yes" if latest_is_milestone else "No",
+                1, True,
+            )
+            sg.addTextBoxCommandInput(
+                "sum_revisions", "Revisions",
+                str(revision_count),
+                1, True,
+            )
+            rev_text = f"Yes — <b>{latest_revision_label}</b>" if latest_is_revision else "No"
+            sg.addTextBoxCommandInput(
+                "sum_latest_rev", "Latest Is Revision",
+                rev_text,
+                1, True,
+            )
+            sg.addTextBoxCommandInput(
+                "sum_public", "Public Share Link",
+                "Yes" if has_public_link else "No",
+                1, True,
+            )
+
             # Comparison version dropdown
             dropdown = inputs.addDropDownCommandInput(
                 "compare_version",
@@ -287,6 +417,7 @@ def command_execute(args: adsk.core.CommandEventArgs):
         product = app.activeProduct
         design = adsk.fusion.Design.cast(product)
         baseline_features = walk_timeline(design.timeline)
+        attach_params_to_features(baseline_features, extract_feature_params(design))
         baseline_info = get_version_info(app.activeDocument.dataFile)
         baseline_properties = extract_design_properties(design)
 
@@ -318,6 +449,7 @@ def command_execute(args: adsk.core.CommandEventArgs):
             return
 
         compare_features = walk_timeline(compare_design.timeline)
+        attach_params_to_features(compare_features, extract_feature_params(compare_design))
         compare_info = get_version_info(compare_data_file)
         compare_properties = extract_design_properties(compare_design)
 
