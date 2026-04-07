@@ -3,7 +3,7 @@ import secrets
 import tempfile
 from pathlib import Path
 
-from .feature_icons import icon_img_tag
+from .feature_icons import get_icon_data_uri, icon_img_tag
 from .timeline_model import DiffResult
 
 
@@ -420,6 +420,22 @@ HTML_CSS = """<style>
         color: #636e72;
     }
 
+    /* Visual timeline wrapper */
+    .visual-timeline-wrap {
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 14px 12px;
+        margin-bottom: 20px;
+    }
+    .visual-timeline-wrap h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
     /* Footer */
     .report-footer {
         margin-top: 20px;
@@ -634,6 +650,219 @@ def _build_properties_table(diff_result: DiffResult) -> str:
 </div>"""
 
 
+# ── Visual timeline colors ──────────────────────────────────────────
+# (fill, stroke, icon_color, band_color)
+_VIS_COLORS = {
+    "unchanged":       ("#e2e3e5", "#c8cacc", "",        "rgba(200,202,204,0.30)"),
+    "newer":           ("#d4edda", "#8bc49a", "#155724",  "rgba(139,196,154,0.45)"),
+    "deleted":         ("#f8d7da", "#e4939a", "#721c24",  "rgba(228,147,154,0.45)"),
+    "version_changed": ("#fff3cd", "#ddc66b", "#856404",  "rgba(221,198,107,0.45)"),
+    "sketch_modified": ("#fde8d0", "#e8b87a", "#8a4b08",  "rgba(232,184,122,0.45)"),
+    "params_changed":  ("#d6eaf8", "#85b8d9", "#1a5276",  "rgba(133,184,217,0.45)"),
+}
+
+
+# Layout constants (px)
+_BOX = 27
+_GAP = 3
+_STRIDE = _BOX + _GAP
+_RADIUS = 4
+_GUTTER = 4
+_PAD_X = 20
+_PAD_Y = 8
+_LABEL_H = 14
+_ROW_Y_NEWER = _PAD_Y + _LABEL_H + 3          # top of newer boxes
+_GUTTER_Y_NEWER = _ROW_Y_NEWER + _BOX          # newer gutter strip
+_RIBBON_TOP = _GUTTER_Y_NEWER + _GUTTER        # top of ribbon area
+_RIBBON_H = 54
+_GUTTER_Y_OLDER = _RIBBON_TOP + _RIBBON_H      # older gutter strip
+_ROW_Y_OLDER = _GUTTER_Y_OLDER + _GUTTER       # top of older boxes
+_SVG_H = _ROW_Y_OLDER + _BOX + _LABEL_H + _PAD_Y + 3
+
+
+def _build_visual_timeline(diff_result: DiffResult) -> str:
+    """Build an SVG visual timeline diff with two rows of boxes and connection ribbons."""
+
+    # ── Determine older/newer assignment ──
+    if diff_result.older_is_comparison:
+        older_info = diff_result.comparison
+        newer_info = diff_result.baseline
+    else:
+        older_info = diff_result.baseline
+        newer_info = diff_result.comparison
+
+    # ── Build position-ordered item lists from aligned rows ──
+    # Each entry: (aligned_row_index, TimelineFeature, status)
+    newer_items = []
+    older_items = []
+    for i, ar in enumerate(diff_result.aligned_rows):
+        if ar.newer:
+            newer_items.append((i, ar.newer, ar.status))
+        if ar.older:
+            older_items.append((i, ar.older, ar.status))
+
+    newer_items.sort(key=lambda x: x[1].index)
+    older_items.sort(key=lambda x: x[1].index)
+
+    # Position lookup: aligned_row_index → position in row
+    newer_pos = {ar_idx: pos for pos, (ar_idx, _, _) in enumerate(newer_items)}
+    older_pos = {ar_idx: pos for pos, (ar_idx, _, _) in enumerate(older_items)}
+
+    max_count = max(len(newer_items), len(older_items), 1)
+    svg_w = _PAD_X + max_count * _STRIDE - _GAP + _PAD_X
+
+    def bx(pos):
+        return _PAD_X + pos * _STRIDE
+
+    def _color(status):
+        return _VIS_COLORS.get(status, _VIS_COLORS["unchanged"])
+
+    parts = []  # SVG element strings
+
+    # ── Row labels ──
+    newer_label = f"V{newer_info.version_number} (Newer)"
+    older_label = f"V{older_info.version_number} (Older)"
+    parts.append(
+        f'<text x="{_PAD_X}" y="{_ROW_Y_NEWER - 6}" '
+        f'font-size="11" font-weight="700" fill="#636e72">'
+        f'{_escape_html(newer_label)}</text>'
+    )
+    parts.append(
+        f'<text x="{_PAD_X}" y="{_ROW_Y_OLDER + _BOX + _LABEL_H}" '
+        f'font-size="11" font-weight="700" fill="#636e72">'
+        f'{_escape_html(older_label)}</text>'
+    )
+
+    # ── Connection ribbons (drawn first, behind boxes) ──
+    for i, ar in enumerate(diff_result.aligned_rows):
+        fill, _, _, band = _color(ar.status)
+        ni = newer_pos.get(i)
+        oi = older_pos.get(i)
+
+        y_top = _RIBBON_TOP
+        y_bot = _GUTTER_Y_OLDER
+        cy1 = y_top + 0.4 * (y_bot - y_top)
+        cy2 = y_top + 0.6 * (y_bot - y_top)
+
+        if ni is not None and oi is not None:
+            # Matched feature — full-width ribbon
+            xl_t, xr_t = bx(ni), bx(ni) + _BOX
+            xl_b, xr_b = bx(oi), bx(oi) + _BOX
+            parts.append(
+                f'<path d="M {xl_t},{y_top} '
+                f'C {xl_t},{cy1} {xl_b},{cy2} {xl_b},{y_bot} '
+                f'L {xr_b},{y_bot} '
+                f'C {xr_b},{cy2} {xr_t},{cy1} {xr_t},{y_top} Z" '
+                f'fill="{band}" stroke="none"/>'
+            )
+        elif ni is not None and oi is None:
+            # New feature — fan from box to insertion point in older row
+            ix = _find_gap_x(i, diff_result.aligned_rows, older_pos, bx)
+            xl_t, xr_t = bx(ni), bx(ni) + _BOX
+            parts.append(
+                f'<path d="M {xl_t},{y_top} '
+                f'C {xl_t},{cy1} {ix},{cy2} {ix},{y_bot} '
+                f'C {ix},{cy2} {xr_t},{cy1} {xr_t},{y_top} Z" '
+                f'fill="{band}" stroke="none"/>'
+            )
+        elif ni is None and oi is not None:
+            # Deleted feature — fan from gap in newer row to box
+            ix = _find_gap_x(i, diff_result.aligned_rows, newer_pos, bx)
+            xl_b, xr_b = bx(oi), bx(oi) + _BOX
+            parts.append(
+                f'<path d="M {ix},{y_top} '
+                f'C {ix},{cy1} {xl_b},{cy2} {xl_b},{y_bot} '
+                f'L {xr_b},{y_bot} '
+                f'C {xr_b},{cy2} {ix},{cy1} {ix},{y_top} Z" '
+                f'fill="{band}" stroke="none"/>'
+            )
+
+    # ── Gutter strips ──
+    for pos, (ar_idx, feat, status) in enumerate(newer_items):
+        fill, _, _, _ = _color(status)
+        parts.append(
+            f'<rect x="{bx(pos)}" y="{_GUTTER_Y_NEWER}" width="{_BOX}" height="{_GUTTER}" '
+            f'fill="{fill}" rx="1"/>'
+        )
+    for pos, (ar_idx, feat, status) in enumerate(older_items):
+        fill, _, _, _ = _color(status)
+        parts.append(
+            f'<rect x="{bx(pos)}" y="{_GUTTER_Y_OLDER}" width="{_BOX}" height="{_GUTTER}" '
+            f'fill="{fill}" rx="1"/>'
+        )
+
+    # ── Feature boxes with feature-type icons and tooltips ──
+    _icon_size = 14  # icon rendered at 14×14 centered in the 27×27 box
+    _icon_pad = (_BOX - _icon_size) / 2
+
+    def _draw_box(pos, feat, status, row_y):
+        fill, stroke, _, _ = _color(status)
+        x = bx(pos)
+        tooltip = f"{_escape_html(feat.name)} ({_escape_html(feat.feature_type)})"
+        box = (
+            f'<g>'
+            f'<rect x="{x}" y="{row_y}" width="{_BOX}" height="{_BOX}" '
+            f'rx="{_RADIUS}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
+        )
+        # Embed the feature-type icon centered in the box
+        icon_uri = get_icon_data_uri(feat.feature_type)
+        if icon_uri:
+            ix = x + _icon_pad
+            iy = row_y + _icon_pad
+            box += (
+                f'<image href="{icon_uri}" '
+                f'x="{ix}" y="{iy}" width="{_icon_size}" height="{_icon_size}" '
+                f'opacity="0.7"/>'
+            )
+        box += f'<title>{tooltip}</title></g>'
+        return box
+
+    for pos, (ar_idx, feat, status) in enumerate(newer_items):
+        parts.append(_draw_box(pos, feat, status, _ROW_Y_NEWER))
+    for pos, (ar_idx, feat, status) in enumerate(older_items):
+        parts.append(_draw_box(pos, feat, status, _ROW_Y_OLDER))
+
+    svg_content = "\n    ".join(parts)
+
+    return f"""<div class="visual-timeline-wrap">
+    <h2>Visual Timeline</h2>
+    <svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{_SVG_H}"
+         viewBox="0 0 {svg_w} {_SVG_H}" style="display:block;">
+    {svg_content}
+    </svg>
+</div>"""
+
+
+def _find_gap_x(ar_index, aligned_rows, pos_map, bx_fn):
+    """Find the x-coordinate in a row where an insertion/deletion gap is.
+
+    Scans backward and forward from ``ar_index`` in aligned_rows to find
+    the nearest rows that have a feature in the target row, then returns
+    the midpoint between those two adjacent box positions.
+    """
+    prev_pos = None
+    next_pos = None
+
+    for j in range(ar_index - 1, -1, -1):
+        if j in pos_map:
+            prev_pos = pos_map[j]
+            break
+
+    for j in range(ar_index + 1, len(aligned_rows)):
+        if j in pos_map:
+            next_pos = pos_map[j]
+            break
+
+    if prev_pos is not None and next_pos is not None:
+        return (bx_fn(prev_pos) + _BOX + bx_fn(next_pos)) / 2
+    elif prev_pos is not None:
+        return bx_fn(prev_pos) + _BOX + _GAP / 2
+    elif next_pos is not None:
+        return bx_fn(next_pos) - _GAP / 2
+    else:
+        return _PAD_X
+
+
 def _build_two_column_table(diff_result: DiffResult) -> str:
     """Build the two-column aligned diff table.
 
@@ -805,6 +1034,7 @@ def generate_html_report(diff_result: DiffResult) -> str:
     filter_badges = _build_filter_badges(diff_result.summary)
     properties_table = _build_properties_table(diff_result)
     feature_table = _build_two_column_table(diff_result)
+    visual_timeline = _build_visual_timeline(diff_result)
 
     filter_js = """<script>
 function toggleFilter(badge) {
@@ -844,6 +1074,8 @@ function applyFilters() {
         {left_card}
         {right_card}
     </div>
+
+    {visual_timeline}
 
     {properties_table}
 

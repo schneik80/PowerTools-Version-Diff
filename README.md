@@ -1,6 +1,6 @@
 # PowerTools: Version Diff for Autodesk Fusion
 
-PowerTools Version Diff is an Autodesk Fusion add-in that compares timeline feature differences between two versions of a design document. It generates an interactive HTML report showing which features were added, deleted, or modified — including external reference (XREF) version changes — in a two-column side-by-side view.
+PowerTools Version Diff is an Autodesk Fusion add-in that compares two versions of a design document. It generates an interactive HTML report with a visual timeline overview, design property comparison, and a detailed two-column feature diff — detecting new features, deletions, XREF version changes, sketch modifications, and parameter value changes.
 
 ## Prerequisites
 
@@ -39,9 +39,11 @@ The following commands are included in this add-in:
 
 After you select a version and click **OK**, the add-in:
 
-- Walks the timeline of both versions to extract all features.
-- Detects new features, deleted features, unchanged features, and XREF component version changes.
-- Generates an interactive HTML report with a two-column aligned view (older version on the left, newer version on the right).
+- Walks the timeline of both versions to extract all features and their parameters.
+- Detects new features, deleted features, unchanged features, XREF component version changes, sketch modifications (via `revisionId`), and parameter value changes.
+- Compares design-level properties: material, appearances, mass, volume, area, density, center of mass, and bounding box extents.
+- Generates a visual timeline overview showing feature boxes with connection ribbons between versions.
+- Produces a detailed two-column diff table with feature-type icons, change details, and interactive filter badges.
 - Exports the raw diff data as a JSON file for programmatic access.
 
 **Requirements:** The active product must be a Fusion 3D Design. The design must be saved, must use the parametric timeline, and must have at least two saved versions.

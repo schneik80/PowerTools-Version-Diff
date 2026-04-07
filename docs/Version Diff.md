@@ -4,9 +4,9 @@
 
 ## Overview
 
-The **Version Diff** command compares the timeline of the active Autodesk Fusion design against any other saved version of the same document. It produces an interactive two-column HTML report that shows every timeline feature side by side, highlighting features that were added, deleted, or modified between the two versions.
+The **Version Diff** command compares the active Autodesk Fusion design against any other saved version of the same document. It produces an interactive HTML report with a visual timeline overview, design property comparison, and a detailed two-column diff table showing every timeline feature side by side.
 
-The command is particularly useful for reviewing design changes before promoting a version, auditing what changed after a colleague saved a new version, or tracking external reference (XREF) component version updates across an assembly's history.
+The command detects new features, deleted features, XREF component version changes, sketch modifications, and parameter value changes. It is useful for reviewing design changes before promoting a version, auditing what changed after a colleague saved a new version, or tracking changes across an assembly's history.
 
 > **Note:** This command is available only for parametric (timeline-based) designs that have at least two saved versions. It is not available for designs in Direct Design mode or for unsaved documents.
 
@@ -29,12 +29,11 @@ The **Version Diff** command is located on the **Tools** tab, in the **PowerTool
 
 1. Open the design you want to analyze.
 2. Run **Version Diff** from the **PowerTools** panel.
-3. The command dialog opens and displays the current version metadata:
-   - Version number
-   - Date modified
-   - Last updated by
-   - Description
-4. Select a comparison version from the **Compare With Version** dropdown. Versions are listed newest first, showing the version number, date, and user.
+3. The command dialog opens and displays:
+   - **Current Version** — version number, date modified, saved by, and description.
+   - **Version Summary** (expandable) — total versions, creation date, last saved date, contributors, milestones, revisions, and public share link status.
+   - **Compare With Version** dropdown — all other versions listed newest first with date and user.
+4. Select a comparison version from the dropdown.
 5. Click **OK** to start the comparison.
 6. The add-in opens the selected comparison version (read-only), walks both timelines, computes the diff, and closes the comparison document.
 7. The HTML report opens automatically in the Fusion built-in browser.
@@ -43,46 +42,68 @@ The **Version Diff** command is located on the **Tools** tab, in the **PowerTool
 
 ### Version cards
 
-The report header shows two version cards side by side:
+The report header shows two version cards side by side with thumbnails (when available), version number, date, user, and description.
 
-| Card | Position | Description |
-|---|---|---|
-| **Older version** | Left | The earlier of the two compared versions, showing version number, date, user, and description. |
-| **Newer version** | Right | The later of the two compared versions, with the same metadata fields. |
+### Visual timeline
+
+Below the version cards, a compact SVG visualization shows both timelines as horizontal rows of feature boxes with colored connection ribbons between them. Each box displays the feature-type icon (extrude, fillet, sketch, joint, etc.) and is color-coded by change status. Ribbons connect matched features; fan-out shapes indicate insertions; fan-in shapes indicate deletions. The visualization scrolls horizontally for large designs.
+
+### Design properties table
+
+A three-column comparison table showing design-level properties side by side:
+
+| Property | Description |
+|---|---|
+| Material | Physical material assigned to the root component. |
+| Appearances | Unique body appearance names. |
+| Bodies | Body count. |
+| Mass, Volume, Area, Density | Physical properties from the root component. |
+| Center of Mass | X, Y, Z coordinates. |
+| Extents | Bounding box dimensions (W &times; H &times; D). |
+
+Changed values are highlighted in the newer column. The heading includes a summary of which properties changed.
 
 ### Summary badges
 
-Below the version cards, a row of summary badges shows the count of changes:
+A row of interactive filter badges shows the count of changes by status. Click a badge to show or hide those rows in the diff table.
 
 | Badge | Color | Description |
 |---|---|---|
-| **Newer** | Green | Features present in the newer version but not in the older version. |
-| **Deleted** | Red | Features present in the older version but not in the newer version. |
-| **XREF Updated** | Yellow | XREF (occurrence) features where the referenced component version changed. Only shown when at least one XREF version change is detected. |
-| **Unchanged** | Gray | Features present in both versions with no changes. |
+| **Newer** | Green | Features present only in the newer version. |
+| **Deleted** | Red | Features present only in the older version. |
+| **XREF Updated** | Yellow | XREF features where the referenced component version changed. |
+| **Sketch Modified** | Amber | Sketches whose content changed (detected via `revisionId`). |
+| **Params Changed** | Blue | Features whose parameter values changed. |
+| **Unchanged** | Gray | Features identical in both versions. |
 
 ### Diff table
 
-The main body of the report is a two-column aligned table:
+The main body of the report is a two-column aligned table with feature-type icons before each feature name. The heading includes a summary of changes by feature type.
 
 | Column group | Description |
 |---|---|
-| **Older version (left)** | Timeline index, feature name, and feature type from the older version. |
-| **Status (center)** | Badge indicating the change status: **NEW**, **DEL**, **SAME**, or **VER &Delta;**. |
-| **Newer version (right)** | Timeline index, feature name, and feature type from the newer version. |
+| **Older version (left)** | Timeline index, feature icon and name, and feature type. |
+| **Status (center)** | Badge: **NEW**, **DEL**, **SAME**, **VER &Delta;**, **SK &Delta;**, or **PRM &Delta;**. |
+| **Newer version (right)** | Timeline index, feature icon and name, and feature type. |
 
-Rows are color-coded by status:
+Rows are color-coded by status and only the changed side is highlighted:
 
-| Status | Row highlight | Description |
+| Status | Highlight | Description |
 |---|---|---|
-| **NEW** | Right side highlighted green | Feature exists only in the newer version. |
-| **DEL** | Left side highlighted red | Feature exists only in the older version. |
+| **NEW** | Newer side green | Feature exists only in the newer version. |
+| **DEL** | Older side red | Feature exists only in the older version. |
 | **SAME** | No highlight | Feature is unchanged between versions. |
-| **VER &Delta;** | Entire row highlighted yellow | XREF component version changed (detail shows the version transition, for example `v1 → v2`). |
+| **VER &Delta;** | Newer side yellow | XREF component version changed (detail below name shows `v1 → v2`). |
+| **SK &Delta;** | Newer side amber | Sketch modified (detail below name shows element count deltas). |
+| **PRM &Delta;** | Newer side blue | Parameter values changed (detail below name shows `d1: 10 mm → 15 mm`). |
 
-### XREF version tracking
+### Change detection details
 
-When the add-in encounters an Occurrence (external reference) feature, it parses the component name and version from the timeline entry. Two occurrences referencing the same component are matched even if their versions differ. The report shows the component version below the feature name and, for version changes, displays the transition (for example `v1 → v2`) in the status column.
+**XREF version tracking:** Occurrence features are matched by component name across versions. Version changes display the transition below the feature name.
+
+**Sketch modification:** Detected via the Fusion `Sketch.revisionId` property, which changes any time sketch content is modified. Element count deltas (lines, circles, arcs, dimensions, constraints, profiles) are shown when counts differ.
+
+**Parameter changes:** All model parameters are extracted per feature via `parameter.createdBy` linkage. Numeric values are compared with tolerance to avoid false positives from expression formatting differences. Only parameters with actual value changes are reported.
 
 ## Output files
 
@@ -101,6 +122,8 @@ Both files use random identifiers. The temporary directory is `%TEMP%` on Window
 - The comparison version is opened read-only. If the comparison version cannot be opened (for example, due to a corrupted version), the command will report an error.
 - Timeline groups are skipped. Only individual features within groups are compared.
 - Feature matching uses the feature name and type as the identity key. If a feature was renamed between versions, it will appear as a deletion and a new addition rather than a modification.
+- Sketch modification detection uses `revisionId`, which is only available on Sketch features. Other feature types do not expose a revision identifier.
+- Parameter change detection compares numeric values with tolerance. Expression formatting differences (such as `180.00 deg` vs `180 deg`) do not trigger false positives.
 - The report is a static snapshot. It does not update automatically when the model changes.
 
 ---
@@ -173,13 +196,13 @@ flowchart TD
     D -- No --> D1[Show error message]
     D -- Yes --> E[Show dialog with current version info\nand comparison dropdown]
     E --> F[User selects comparison version\nand clicks OK]
-    F --> G[Walk baseline timeline]
+    F --> G[Walk baseline timeline\nextract sketch fingerprints\nextract feature parameters\nextract design properties]
     G --> H[Open comparison version read-only]
-    H --> I[Walk comparison timeline]
+    H --> I[Walk comparison timeline\nextract sketch fingerprints\nextract feature parameters\nextract design properties]
     I --> J[Close comparison document]
-    J --> K[Compute diff:\nnewer / deleted / unchanged / version_changed]
+    J --> K[Compute diff:\nnewer / deleted / unchanged /\nversion_changed / sketch_modified / params_changed]
     K --> L[Save JSON to temp file]
-    L --> M[Generate HTML report to temp file]
+    L --> M[Generate HTML report:\nvisual timeline + properties table + diff table]
     M --> N[Open HTML in Fusion browser]
 ```
 
@@ -200,6 +223,32 @@ classDiagram
         +str entity_type
         +str component_name
         +str component_version
+        +SketchFingerprint sketch_fingerprint
+        +dict feature_params
+    }
+
+    class SketchFingerprint {
+        +str revision_id
+        +int line_count
+        +int circle_count
+        +int arc_count
+        +int dimension_count
+        +int constraint_count
+        +int profile_count
+        +bool is_fully_constrained
+    }
+
+    class DesignProperties {
+        +str material
+        +list body_appearances
+        +float mass
+        +float volume
+        +float area
+        +float density
+        +tuple center_of_mass
+        +tuple bbox_min
+        +tuple bbox_max
+        +int body_count
     }
 
     class VersionInfo {
@@ -209,15 +258,7 @@ classDiagram
         +str date_modified
         +str last_updated_by
         +str description
-    }
-
-    class DiffEntry {
-        +str name
-        +str feature_type
-        +str status
-        +int baseline_index
-        +int compare_index
-        +str detail
+        +str thumbnail_b64
     }
 
     class AlignedRow {
@@ -225,24 +266,27 @@ classDiagram
         +TimelineFeature newer
         +str status
         +str detail
+        +str sketch_detail
+        +str params_detail
     }
 
     class DiffResult {
         +VersionInfo baseline
         +VersionInfo comparison
-        +list~DiffEntry~ features
         +list~AlignedRow~ aligned_rows
         +dict summary
         +bool older_is_comparison
-        +to_json() str
+        +DesignProperties baseline_properties
+        +DesignProperties comparison_properties
     }
 
     DiffResult --> VersionInfo : baseline
     DiffResult --> VersionInfo : comparison
-    DiffResult --> DiffEntry : features
     DiffResult --> AlignedRow : aligned_rows
+    DiffResult --> DesignProperties : properties
     AlignedRow --> TimelineFeature : older
     AlignedRow --> TimelineFeature : newer
+    TimelineFeature --> SketchFingerprint : sketch_fingerprint
 ```
 
 ---
