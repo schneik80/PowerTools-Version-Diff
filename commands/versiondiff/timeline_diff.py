@@ -198,6 +198,15 @@ def _make_aligned_row(baseline_f: 'TimelineFeature', compare_f: 'TimelineFeature
                 status="params_changed", params_detail=p_detail,
             )
 
+    # Check for health state change (only change is health status)
+    if (baseline_f.health_state and compare_f.health_state
+            and baseline_f.health_state != compare_f.health_state):
+        h_detail = f"{compare_f.health_state} \u2192 {baseline_f.health_state}"
+        return AlignedRow(
+            older=compare_f, newer=baseline_f,
+            status="health_changed", health_detail=h_detail,
+        )
+
     return AlignedRow(older=compare_f, newer=baseline_f, status="unchanged")
 
 
@@ -265,6 +274,11 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
                 else:
                     status = "unchanged"
                     detail = ""
+            # Check for health state change (only change is health status)
+            elif (f.health_state and cf.health_state
+                    and f.health_state != cf.health_state):
+                status = "health_changed"
+                detail = f"{cf.health_state} \u2192 {f.health_state}"
             else:
                 status = "unchanged"
                 detail = ""
@@ -355,6 +369,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
     version_changed_count = sum(1 for e in diff_entries if e.status == "version_changed")
     sketch_modified_count = sum(1 for e in diff_entries if e.status == "sketch_modified")
     params_changed_count = sum(1 for e in diff_entries if e.status == "params_changed")
+    health_changed_count = sum(1 for e in diff_entries if e.status == "health_changed")
 
     summary = {
         "newer": newer_count,
@@ -363,6 +378,7 @@ def compute_diff(baseline_features: list, compare_features: list) -> tuple:
         "version_changed": version_changed_count,
         "sketch_modified": sketch_modified_count,
         "params_changed": params_changed_count,
+        "health_changed": health_changed_count,
         "total_baseline": len(baseline_features),
         "total_comparison": len(compare_features),
     }

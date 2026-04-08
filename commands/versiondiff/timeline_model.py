@@ -52,10 +52,11 @@ class AlignedRow:
     """
     older: Optional[TimelineFeature]
     newer: Optional[TimelineFeature]
-    status: str  # "newer" | "deleted" | "unchanged" | "version_changed" | "sketch_modified" | "params_changed"
+    status: str  # "newer" | "deleted" | "unchanged" | "version_changed" | "sketch_modified" | "params_changed" | "health_changed"
     detail: str = ""  # Extra info for version_changed rows
     sketch_detail: str = ""  # Count delta summary for sketch_modified rows
     params_detail: str = ""  # Parameter change summary for params_changed rows
+    health_detail: str = ""  # Health state change summary for health_changed rows
 
 
 @dataclass

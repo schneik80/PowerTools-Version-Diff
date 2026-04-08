@@ -6,7 +6,7 @@
 
 The **Version Diff** command compares the active Autodesk Fusion design against any other saved version of the same document. It produces an interactive HTML report with a visual timeline overview, design property comparison, and a detailed two-column diff table showing every timeline feature side by side.
 
-The command detects new features, deleted features, XREF component version changes, sketch modifications, and parameter value changes. It is useful for reviewing design changes before promoting a version, auditing what changed after a colleague saved a new version, or tracking changes across an assembly's history.
+The command detects new features, deleted features, XREF component version changes, sketch modifications, parameter value changes, and feature health state changes. It is useful for reviewing design changes before promoting a version, auditing what changed after a colleague saved a new version, or tracking changes across an assembly's history.
 
 > **Note:** This command is available only for parametric (timeline-based) designs that have at least two saved versions. It is not available for designs in Direct Design mode or for unsaved documents.
 
@@ -74,6 +74,7 @@ A row of interactive filter badges shows the count of changes by status. Click a
 | **XREF Updated** | Yellow | XREF features where the referenced component version changed. |
 | **Sketch Modified** | Amber | Sketches whose content changed (detected via `revisionId`). |
 | **Params Changed** | Blue | Features whose parameter values changed. |
+| **Health Changed** | Orange | Features whose only change is their health state (e.g., Healthy to Warning or Error). |
 | **Unchanged** | Gray | Features identical in both versions. |
 
 ### Diff table
@@ -83,7 +84,7 @@ The main body of the report is a two-column aligned table with feature-type icon
 | Column group | Description |
 |---|---|
 | **Older version (left)** | Timeline index, feature icon and name, and feature type. |
-| **Status (center)** | Badge: **NEW**, **DEL**, **SAME**, **VER &Delta;**, **SK &Delta;**, or **PRM &Delta;**. |
+| **Status (center)** | Badge: **NEW**, **DEL**, **SAME**, **VER &Delta;**, **SK &Delta;**, **PRM &Delta;**, or **HTH &Delta;**. |
 | **Newer version (right)** | Timeline index, feature icon and name, and feature type. |
 
 Rows are color-coded by status and only the changed side is highlighted:
@@ -96,6 +97,7 @@ Rows are color-coded by status and only the changed side is highlighted:
 | **VER &Delta;** | Newer side yellow | XREF component version changed (detail below name shows `v1 → v2`). |
 | **SK &Delta;** | Newer side amber | Sketch modified (detail below name shows element count deltas). |
 | **PRM &Delta;** | Newer side blue | Parameter values changed (detail below name shows `d1: 10 mm → 15 mm`). |
+| **HTH &Delta;** | Newer side orange | Feature health state changed with no other modifications (detail below name shows `Healthy → Error`). |
 
 ### Change detection details
 
@@ -104,6 +106,8 @@ Rows are color-coded by status and only the changed side is highlighted:
 **Sketch modification:** Detected via the Fusion `Sketch.revisionId` property, which changes any time sketch content is modified. Element count deltas (lines, circles, arcs, dimensions, constraints, profiles) are shown when counts differ.
 
 **Parameter changes:** All model parameters are extracted per feature via `parameter.createdBy` linkage. Numeric values are compared with tolerance to avoid false positives from expression formatting differences. Only parameters with actual value changes are reported.
+
+**Health state changes:** Detected via the Fusion `FeatureHealthStates` enum, which reports each feature as Healthy, Warning, or Error. A feature is flagged as health-changed only when its health state differs between versions and no other modification (parameters, sketch content, XREF version) is detected. The transition is shown below the feature name (e.g., `Healthy → Error`).
 
 ## Output files
 
@@ -200,7 +204,7 @@ flowchart TD
     G --> H[Open comparison version read-only]
     H --> I[Walk comparison timeline\nextract sketch fingerprints\nextract feature parameters\nextract design properties]
     I --> J[Close comparison document]
-    J --> K[Compute diff:\nnewer / deleted / unchanged /\nversion_changed / sketch_modified / params_changed]
+    J --> K[Compute diff:\nnewer / deleted / unchanged /\nversion_changed / sketch_modified /\nparams_changed / health_changed]
     K --> L[Save JSON to temp file]
     L --> M[Generate HTML report:\nvisual timeline + properties table + diff table]
     M --> N[Open HTML in Fusion browser]
@@ -268,6 +272,7 @@ classDiagram
         +str detail
         +str sketch_detail
         +str params_detail
+        +str health_detail
     }
 
     class DiffResult {

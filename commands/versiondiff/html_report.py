@@ -152,6 +152,10 @@ HTML_CSS = """<style>
         background: #d6eaf8;
         color: #1a5276;
     }
+    .filter-badge-health_changed {
+        background: #ffe0b2;
+        color: #e65100;
+    }
 
     /* Two-column diff table */
     .diff-table-wrap {
@@ -284,6 +288,17 @@ HTML_CSS = """<style>
         font-weight: 600;
     }
 
+    /* Health changed rows — highlight the newer (changed) side in orange */
+    tr.row-health_changed td.col-divider {
+        background: #ffe0b2;
+    }
+    tr.row-health_changed td.newer-name,
+    tr.row-health_changed td.newer-type,
+    tr.row-health_changed td.newer-idx {
+        background: #fff3e0;
+        font-weight: 600;
+    }
+
     /* Sketch change detail text (shown under feature name) */
     .sketch-detail {
         display: block;
@@ -300,6 +315,17 @@ HTML_CSS = """<style>
         display: block;
         font-size: 10px;
         color: #1a5276;
+        font-weight: 400;
+        margin-top: 1px;
+        white-space: normal;
+        line-height: 1.3;
+    }
+
+    /* Health change detail text (shown under feature name) */
+    .health-detail {
+        display: block;
+        font-size: 10px;
+        color: #e65100;
         font-weight: 400;
         margin-top: 1px;
         white-space: normal;
@@ -353,6 +379,10 @@ HTML_CSS = """<style>
     .status-params_changed {
         background: #d6eaf8;
         color: #1a5276;
+    }
+    .status-health_changed {
+        background: #ffe0b2;
+        color: #e65100;
     }
 
     /* Arrow indicator */
@@ -514,12 +544,22 @@ def _build_filter_badges(summary: dict) -> str:
             f'<span class="count">{params_changed}</span> Params Changed</span>'
         )
 
+    health_changed = summary.get('health_changed', 0)
+    health_badge = ""
+    if health_changed > 0:
+        health_badge = (
+            f'<span class="filter-badge filter-badge-health_changed" '
+            f'data-filter="health_changed" onclick="toggleFilter(this)">'
+            f'<span class="count">{health_changed}</span> Health Changed</span>'
+        )
+
     return f"""<div class="filter-row">
     <span class="filter-badge filter-badge-newer" data-filter="newer" onclick="toggleFilter(this)"><span class="count">{summary.get('newer', 0)}</span> Newer</span>
     <span class="filter-badge filter-badge-deleted" data-filter="deleted" onclick="toggleFilter(this)"><span class="count">{summary.get('deleted', 0)}</span> Deleted</span>
     {vc_badge}
     {sk_badge}
     {prm_badge}
+    {health_badge}
     <span class="filter-badge filter-badge-unchanged" data-filter="unchanged" onclick="toggleFilter(this)"><span class="count">{summary.get('unchanged', 0)}</span> Unchanged</span>
 </div>"""
 
@@ -659,6 +699,7 @@ _VIS_COLORS = {
     "version_changed": ("#fff3cd", "#ddc66b", "#856404",  "rgba(221,198,107,0.45)"),
     "sketch_modified": ("#fde8d0", "#e8b87a", "#8a4b08",  "rgba(232,184,122,0.45)"),
     "params_changed":  ("#d6eaf8", "#85b8d9", "#1a5276",  "rgba(133,184,217,0.45)"),
+    "health_changed":  ("#ffe0b2", "#ffb74d", "#e65100",  "rgba(255,183,77,0.45)"),
 }
 
 
@@ -890,6 +931,7 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
         "version_changed": "VER \u0394",
         "sketch_modified": "SK \u0394",
         "params_changed": "PRM \u0394",
+        "health_changed": "HTH \u0394",
     }
 
     rows = []
@@ -934,6 +976,9 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
             # Show parameter change detail under the name
             if ar.status == "params_changed" and ar.params_detail:
                 newer_name += f'<span class="params-detail">{_escape_html(ar.params_detail)}</span>'
+            # Show health change detail under the name
+            if ar.status == "health_changed" and ar.health_detail:
+                newer_name += f'<span class="health-detail">{_escape_html(ar.health_detail)}</span>'
             newer_cls = ""
         else:
             newer_idx = ""
@@ -956,7 +1001,7 @@ def _build_two_column_table(diff_result: DiffResult) -> str:
     table_rows = "\n        ".join(rows)
 
     # Build a plain-English summary of changes by feature type
-    changed_statuses = {"newer", "deleted", "version_changed", "sketch_modified", "params_changed"}
+    changed_statuses = {"newer", "deleted", "version_changed", "sketch_modified", "params_changed", "health_changed"}
     type_counts: dict[str, int] = {}
     total_changed = 0
     for ar in diff_result.aligned_rows:
