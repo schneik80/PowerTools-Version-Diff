@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 """Generate version diff branch/timeline icons using Pillow.
 
 Concept A: Split timeline - a common root splits into two branches with

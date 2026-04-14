@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 """Sketch fingerprinting for change detection between versions.
 
 Extracts a lightweight fingerprint from a live Fusion 360 Sketch entity

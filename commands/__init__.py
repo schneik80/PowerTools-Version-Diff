@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 from .versiondiff import entry as versiondiff
 
 # Fusion will automatically call the start() and stop() functions.

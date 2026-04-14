@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 """Extract physical material, appearances, mass properties and extents from a design.
 
 Used by the version diff to compare design-level properties between two

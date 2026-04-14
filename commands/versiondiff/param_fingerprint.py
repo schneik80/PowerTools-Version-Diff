@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 """Parameter fingerprinting for detecting value changes between versions.
 
 Walks ``design.allParameters``, groups them by owning timeline feature

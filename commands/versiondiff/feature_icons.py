@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2022-2026 IMA LLC
+
 """Fusion 360 feature-type → icon mapping for the version diff report.
 
 Each key is the short class name extracted from entity.objectType
